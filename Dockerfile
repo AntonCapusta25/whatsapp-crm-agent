@@ -33,8 +33,10 @@ USER pptruser
 # Expose server port
 EXPOSE 3005
 
+# Install Chromium for Puppeteer explicitly
+RUN npx puppeteer browsers install chrome
+
 # Configure Chromium paths
-ENV PUPPETEER_EXECUTABLE_PATH="/usr/bin/google-chrome-stable"
 ENV PORT=3005
 
 # Start command
