@@ -92,6 +92,53 @@ export default function App() {
     emailNotification: { enabled: false, apiKey: '', fromEmail: '', toEmail: '', subject: '' }
   });
 
+  const [showCampaigns, setShowCampaigns] = useState(false);
+  const [campaignProfiles, setCampaignProfiles] = useState([]);
+  const [selectedCampaignProfiles, setSelectedCampaignProfiles] = useState(new Set());
+  const [campaignMessage, setCampaignMessage] = useState('');
+  const [campaignFilter, setCampaignFilter] = useState('all');
+  const [isSendingCampaign, setIsSendingCampaign] = useState(false);
+
+  const loadCampaignProfiles = async () => {
+    try {
+      const res = await fetch('/api/crm/profiles');
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setCampaignProfiles(data.profiles);
+      }
+    } catch (e) {
+      console.error('Error fetching campaign profiles:', e);
+    }
+  };
+
+  const handleSendCampaign = async (e) => {
+    e.preventDefault();
+    if (selectedCampaignProfiles.size === 0 || !campaignMessage.trim()) return;
+    
+    setIsSendingCampaign(true);
+    const phones = Array.from(selectedCampaignProfiles);
+    
+    try {
+      const res = await fetch(`/api/${tenantId}/campaign/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phones, message: campaignMessage.trim() })
+      });
+      if (res.ok) {
+        alert(`Successfully queued ${phones.length} messages! They will be sent with human-like delays.`);
+        setShowCampaigns(false);
+        setCampaignMessage('');
+        setSelectedCampaignProfiles(new Set());
+      } else {
+        alert('Failed to queue campaign. Ensure tenant is READY.');
+      }
+    } catch (e) {
+      console.error('Error sending campaign:', e);
+      alert('Error sending campaign.');
+    }
+    setIsSendingCampaign(false);
+  };
+
   const messagesEndRef = useRef(null);
   const activeChatRef = useRef(null);
   useEffect(() => {
@@ -515,6 +562,13 @@ export default function App() {
               title="Force Refresh Chats"
             >
               🔄
+            </button>
+            <button 
+              onClick={() => { setShowCampaigns(true); loadCampaignProfiles(); }} 
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem', padding: '4px 8px', display: 'flex', alignItems: 'center', color: 'var(--text-main)' }}
+              title="Batch Campaign Manager"
+            >
+              📢
             </button>
             <button 
               onClick={() => setShowSettings(true)} 
@@ -1403,6 +1457,94 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Batch Campaign Manager Modal */}
+      {showCampaigns && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, backdropFilter: 'blur(3px)' }}>
+          <div style={{ backgroundColor: 'var(--bg-chat)', border: '1px solid var(--border-color)', borderRadius: '12px', width: '90%', maxWidth: '800px', maxHeight: '90vh', overflowY: 'auto', padding: '2rem', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.04)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem' }}>
+              <h2 style={{ margin: 0, color: 'var(--text-main)', fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                📢 Batch Campaign Manager <span style={{ fontSize: '0.8rem', background: 'var(--hover-chat)', padding: '2px 8px', borderRadius: '4px', color: 'var(--text-muted)' }}>{tenantId}</span>
+              </h2>
+              <button onClick={() => setShowCampaigns(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '1.5rem', cursor: 'pointer' }}>×</button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '2rem' }}>
+              <div style={{ flex: 1 }}>
+                <h3 style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Filter Target Audience</h3>
+                <select 
+                  style={{ width: '100%', padding: '0.5rem', backgroundColor: 'var(--hover-chat)', border: '1px solid var(--border-color)', color: 'var(--text-main)', borderRadius: '6px', marginBottom: '1rem' }}
+                  value={campaignFilter}
+                  onChange={(e) => {
+                    setCampaignFilter(e.target.value);
+                    setSelectedCampaignProfiles(new Set()); // Reset selection on filter change
+                  }}
+                >
+                  <option value="all">All Profiles</option>
+                  <option value="amsterdam">Location: Amsterdam</option>
+                  <option value="delivery">Has Delivery</option>
+                  <option value="no_delivery">No Delivery</option>
+                </select>
+
+                <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '6px', backgroundColor: 'var(--app-bg)' }}>
+                  {campaignProfiles
+                    .filter(p => {
+                      if (campaignFilter === 'amsterdam') return p.city?.toLowerCase().includes('amsterdam');
+                      if (campaignFilter === 'delivery') return p.offers_delivery === true || String(p.offers_delivery) === 'true';
+                      if (campaignFilter === 'no_delivery') return p.offers_delivery === false || String(p.offers_delivery) === 'false';
+                      return true;
+                    })
+                    .map((profile, i) => (
+                      <label key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem', borderBottom: '1px solid var(--border-color)', cursor: 'pointer' }}>
+                        <input 
+                          type="checkbox" 
+                          checked={selectedCampaignProfiles.has(profile.contact_phone)}
+                          onChange={(e) => {
+                            const next = new Set(selectedCampaignProfiles);
+                            if (e.target.checked) next.add(profile.contact_phone);
+                            else next.delete(profile.contact_phone);
+                            setSelectedCampaignProfiles(next);
+                          }}
+                        />
+                        <div style={{ fontSize: '0.85rem', display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{profile.name}</span>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{profile.contact_phone} • {profile.city}</span>
+                        </div>
+                      </label>
+                  ))}
+                  {campaignProfiles.length === 0 && (
+                    <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>No profiles found.</div>
+                  )}
+                </div>
+                
+                <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: 'var(--accent-blue)' }}>
+                  {selectedCampaignProfiles.size} selected
+                </div>
+              </div>
+
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                <h3 style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Campaign Message</h3>
+                <textarea 
+                  className="chat-input"
+                  style={{ flex: 1, backgroundColor: 'var(--hover-chat)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.75rem', color: 'var(--text-main)', fontSize: '0.9rem', resize: 'none', marginBottom: '1rem' }}
+                  placeholder="Type the message to broadcast..."
+                  value={campaignMessage}
+                  onChange={(e) => setCampaignMessage(e.target.value)}
+                />
+                <button 
+                  onClick={handleSendCampaign}
+                  disabled={isSendingCampaign || selectedCampaignProfiles.size === 0 || !campaignMessage.trim()}
+                  style={{ backgroundColor: 'var(--accent-green)', border: 'none', color: 'white', padding: '0.75rem', borderRadius: '6px', fontWeight: 600, cursor: (isSendingCampaign || selectedCampaignProfiles.size === 0 || !campaignMessage.trim()) ? 'not-allowed' : 'pointer', opacity: (isSendingCampaign || selectedCampaignProfiles.size === 0 || !campaignMessage.trim()) ? 0.5 : 1 }}
+                >
+                  {isSendingCampaign ? 'Queueing Campaign...' : `Send to ${selectedCampaignProfiles.size} Chefs`}
+                </button>
+                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.5rem', textAlign: 'center' }}>
+                  Messages will be sent with a 5-15 second random delay to simulate human typing and prevent WhatsApp bans.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       )}

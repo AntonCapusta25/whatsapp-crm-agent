@@ -1409,6 +1409,44 @@ app.get('/api/:tenantId/chats', async (req, res) => {
     }
 });
 
+// 13. Fetch all CRM Profiles for Campaign Manager
+app.get('/api/crm/profiles', async (req, res) => {
+    try {
+        const { data, error } = await crmSupabase
+            .from('chef_profiles')
+            .select('*');
+        if (error) throw error;
+        return res.json({ success: true, profiles: data });
+    } catch (e) {
+        return res.status(500).json({ error: e.message });
+    }
+});
+
+// 14. Dispatch Batch Campaign
+app.post('/api/:tenantId/campaign/send', async (req, res) => {
+    const { tenantId } = req.params;
+    const { phones, message } = req.body;
+    
+    if (!phones || !Array.isArray(phones) || !message) {
+        return res.status(400).json({ error: 'Missing phones array or message.' });
+    }
+    
+    if (sessionManager.getStatus(tenantId) !== 'READY') {
+        return res.status(503).json({ error: `Tenant ${tenantId} is not ready.` });
+    }
+    
+    phones.forEach(phone => {
+        if (!phone) return;
+        // Strip formatting (keep only digits)
+        const rawPhone = phone.toString().replace(/\D/g, '');
+        if (rawPhone.length < 8) return;
+        const jid = `${rawPhone}@c.us`;
+        sessionManager.queueMessage(tenantId, jid, message);
+    });
+    
+    return res.json({ success: true, queued: phones.length });
+});
+
 // 12. Fetch list of all known tenants
 app.get('/api/tenants', async (req, res) => {
     const tenants = new Set();
