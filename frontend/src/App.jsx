@@ -117,20 +117,6 @@ export default function App() {
     }
   };
 
-  const apiFetch = async (url, options = {}) => {
-    const token = localStorage.getItem('agent_auth_token');
-    const headers = { ...options.headers };
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-    const res = await fetch(url, { ...options, headers });
-    if (res.status === 401 && url !== '/api/auth/login') {
-      setIsAuthenticated(false);
-      localStorage.removeItem('agent_auth_token');
-    }
-    return res;
-  };
-
   if (!isAuthenticated) {
     return (
       <div className="app-container" style={{ justifyContent: 'center', alignItems: 'center', backgroundImage: 'radial-gradient(circle at center, #111b21 0%, #0b141a 100%)' }}>
