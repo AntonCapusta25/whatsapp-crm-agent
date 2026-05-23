@@ -21,6 +21,9 @@ RUN npm ci
 COPY . .
 COPY --from=builder /app/frontend/dist ./frontend/dist
 
+# Pre-create directories for volumes to ensure proper ownership
+RUN mkdir -p /app/.wwebjs_auth /app/backups
+
 # Ensure the correct permissions on the working directory
 RUN chown -R pptruser:pptruser /app
 
