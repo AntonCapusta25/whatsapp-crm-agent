@@ -1217,6 +1217,76 @@ if (crmSupabase) {
             console.error('[Catering-Welcome] Polling fallback exception:', pollErr.message);
         }
     }, 20000);
+
+    // ------------------------------------------------------------------
+    // "No Answer" Followup Daemon (chef_admin_data & old_leads)
+    // ------------------------------------------------------------------
+    const notifiedNoAnswers = new Set();
+
+    const dispatchNoAnswerMessage = async (phoneStr, nameStr, recordId) => {
+        if (!phoneStr || notifiedNoAnswers.has(recordId)) return;
+        notifiedNoAnswers.add(recordId);
+
+        const sanitizedPhone = sanitizePhone(phoneStr);
+        if (!sanitizedPhone) return;
+
+        const jid = `${sanitizedPhone}@c.us`;
+        const firstName = nameStr ? nameStr.trim().split(' ')[0] : '';
+        const greeting = firstName ? `Hey ${firstName}, ` : `Hey! `;
+        const messageText = `${greeting}We tried calling you regarding your Homemade application but it looks like you were not available. Let us know when is a good time to reach you, or if you prefer, we can just chat right here!`;
+
+        // We will queue this on the 'default' tenant if it's ready, or the first available READY tenant.
+        let targetTenant = 'default';
+        if (sessionManager.getStatus('default') !== 'READY') {
+            const readyTenants = Array.from(sessionManager.statuses.keys()).filter(t => sessionManager.getStatus(t) === 'READY');
+            if (readyTenants.length > 0) {
+                targetTenant = readyTenants[0];
+            } else {
+                console.log(`[NoAnswer-Daemon] Dropping No Answer followup for ${sanitizedPhone} - no tenants are READY.`);
+                return;
+            }
+        }
+
+        console.log(`[NoAnswer-Daemon] 📩 Queueing No Answer followup for ${sanitizedPhone} on tenant: ${targetTenant}`);
+        sessionManager.queueMessage(targetTenant, jid, messageText);
+    };
+
+    try {
+        // Listen to chef_admin_data updates
+        crmSupabase
+            .channel('public:chef_admin_data')
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'chef_admin_data' }, async (payload) => {
+                if (payload.new && payload.new.admin_status === 'no_answer') {
+                    const chefId = payload.new.chef_profile_id;
+                    if (!chefId) return;
+                    
+                    const { data, error } = await crmSupabase
+                        .from('chef_profiles')
+                        .select('contact_phone, chef_name')
+                        .eq('id', chefId)
+                        .single();
+                        
+                    if (data && !error && data.contact_phone) {
+                        await dispatchNoAnswerMessage(data.contact_phone, data.chef_name, payload.new.id);
+                    }
+                }
+            })
+            .subscribe();
+
+        // Listen to old_leads updates
+        crmSupabase
+            .channel('public:old_leads')
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'old_leads' }, async (payload) => {
+                if (payload.new && payload.new.status === 'no_answer') {
+                    await dispatchNoAnswerMessage(payload.new.phone, payload.new.name, payload.new.id);
+                }
+            })
+            .subscribe();
+            
+        console.log(`[NoAnswer-Daemon] Subscribed to Realtime UPDATE events for 'no_answer' triggers.`);
+    } catch (err) {
+        console.error('[NoAnswer-Daemon] Subscription error:', err.message);
+    }
 }
 
 // ------------------------------------------------------------------
