@@ -1489,14 +1489,37 @@ export default function App() {
                 </select>
 
                 <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '6px', backgroundColor: 'var(--app-bg)' }}>
-                  {campaignProfiles
-                    .filter(p => {
+                  {(() => {
+                    const filteredProfiles = campaignProfiles.filter(p => {
                       if (campaignFilter === 'amsterdam') return p.city?.toLowerCase().includes('amsterdam');
                       if (campaignFilter === 'delivery') return p.offers_delivery === true || String(p.offers_delivery) === 'true';
                       if (campaignFilter === 'no_delivery') return p.offers_delivery === false || String(p.offers_delivery) === 'false';
                       return true;
-                    })
-                    .map((profile, i) => (
+                    });
+                    
+                    const allSelected = filteredProfiles.length > 0 && filteredProfiles.every(p => selectedCampaignProfiles.has(p.contact_phone));
+                    
+                    return (
+                      <>
+                        {filteredProfiles.length > 0 && (
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem', borderBottom: '2px solid var(--border-color)', cursor: 'pointer', backgroundColor: 'rgba(255,255,255,0.05)' }}>
+                            <input 
+                              type="checkbox" 
+                              checked={allSelected}
+                              onChange={(e) => {
+                                const next = new Set(selectedCampaignProfiles);
+                                if (e.target.checked) {
+                                  filteredProfiles.forEach(p => next.add(p.contact_phone));
+                                } else {
+                                  filteredProfiles.forEach(p => next.delete(p.contact_phone));
+                                }
+                                setSelectedCampaignProfiles(next);
+                              }}
+                            />
+                            <span style={{ fontWeight: 700, color: 'var(--text-main)', fontSize: '0.85rem' }}>Select All ({filteredProfiles.length})</span>
+                          </label>
+                        )}
+                        {filteredProfiles.map((profile, i) => (
                       <label key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem', borderBottom: '1px solid var(--border-color)', cursor: 'pointer' }}>
                         <input 
                           type="checkbox" 
@@ -1514,9 +1537,12 @@ export default function App() {
                         </div>
                       </label>
                   ))}
-                  {campaignProfiles.length === 0 && (
+                  {filteredProfiles.length === 0 && (
                     <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>No profiles found.</div>
                   )}
+                      </>
+                    );
+                  })()}
                 </div>
                 
                 <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: 'var(--accent-blue)' }}>

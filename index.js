@@ -484,9 +484,10 @@ ${history}
 The client's last message is: "${currentMsgBody}"
 
 Analyze the chat history and the user's latest message.
-GUARDRAILS TO PREVENT SPAM:
+GUARDRAILS AND RULES:
 1. If the user's message is a simple acknowledgment (like 'ok', 'thanks', 'cool', '👍') and no response is actually required, respond with exactly: NO_RESPONSE_NEEDED.
 2. Do not send long follow-ups if the user just answered a quick question.
+3. MULTILINGUAL ENFORCEMENT: You MUST formulate your entire response in the EXACT SAME LANGUAGE that the user used in their last message. For example, if they text in Ukrainian, your ENTIRE reply must be in Ukrainian. If Dutch, reply in Dutch.
 
 Otherwise, return only the proposed text response (do not include any conversational formatting like "Here is the response:" or quotes).`;
 }
