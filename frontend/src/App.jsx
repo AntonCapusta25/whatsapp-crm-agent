@@ -16,6 +16,11 @@ const PRESET_ANSWERS = [
     text: "You can choose a yearly commission-only plan (10%, 12%, or 14%) or a monthly plan that combines a small base fee (€25/€35/€45) with a lower commission (5%/6%/7%). Yearly is the default."
   },
   {
+    label: "No Answer Followup",
+    title: "We tried calling but no response",
+    text: "Hey, we have been trying to contact you regarding your Homemade application but you were not available. Please let us know when is a good time to reach you or if you prefer to chat here!"
+  },
+  {
     label: "Commission",
     title: "What's the commission based on?",
     text: "Commission is taken from the gross order value, which includes delivery fees and VAT."
@@ -1612,16 +1617,21 @@ export default function App() {
                 >
                   <option value="all">All Profiles</option>
                   <option value="amsterdam">Location: Amsterdam</option>
-                  <option value="delivery">Has Delivery</option>
+                  <option value="delivery">Has Delivery (Service Type)</option>
                   <option value="no_delivery">No Delivery</option>
+                  <option value="amsterdam_delivery">Amsterdam & Has Delivery</option>
                 </select>
 
                 <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '6px', backgroundColor: 'var(--app-bg)' }}>
                   {(() => {
                     const filteredProfiles = campaignProfiles.filter(p => {
-                      if (campaignFilter === 'amsterdam') return p.city?.toLowerCase().includes('amsterdam');
-                      if (campaignFilter === 'delivery') return p.offers_delivery === true || String(p.offers_delivery) === 'true';
-                      if (campaignFilter === 'no_delivery') return p.offers_delivery === false || String(p.offers_delivery) === 'false';
+                      const isAmsterdam = p.city?.toLowerCase().includes('amsterdam');
+                      const hasDelivery = p.service_type === 'delivery' || p.service_type === 'both' || p.service_type === 'takeaway_delivery';
+                      
+                      if (campaignFilter === 'amsterdam') return isAmsterdam;
+                      if (campaignFilter === 'delivery') return hasDelivery;
+                      if (campaignFilter === 'no_delivery') return !hasDelivery;
+                      if (campaignFilter === 'amsterdam_delivery') return isAmsterdam && hasDelivery;
                       return true;
                     });
                     
