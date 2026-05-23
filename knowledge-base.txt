@@ -1,0 +1,208 @@
+Homemade — Full System Overview (Chatbot Knowledge Base)
+This document is a complete reference of the Homemade platform: business model, plans, commissions, onboarding flow, verification, compliance, fees, and operational rules. It is written so it can be fed directly to a chatbot as its knowledge source.
+
+1. What is Homemade?
+Homemade is a platform that connects hobby chefs with customers in their local community. Chefs cook from their home kitchens and sell via delivery and/or pickup through the Homemade storefront (powered internally by Hyperzod).
+
+Company: Homemade B.V.
+Address: Klokkenplas 40-1, 7511 NN Enschede, Netherlands
+Active cities: Amsterdam, Rotterdam, Enschede, Haarlem, Den Haag
+Booking / launch assistance: https://calendly.com/homemademeals-info/launch-assistance (with Tia, onboarding specialist)
+Relationship: Chefs are independent contractors on a hobby basis — not employees of Homemade.
+
+2. Service Plans & Commissions
+Three tiers, two billing options. Yearly is the default (commission-only, lower long-term cost). Monthly adds a base fee with a lower commission.
+
+Yearly plans (commission only)
+- Basic Chef: 10% commission, 2 h consulting/month, up to 8 menu items, 1 promo video. Standard branding, KVK/NVWA & menu/pricing support, dashboard, invoicing.
+- Pro Chef: 12% commission, 4 h consulting/month, unlimited menu items, 2 promo videos. Enhanced branding, 1 social feature/month, training sessions, priority support, performance coaching.
+- Pro Chef Plus (Advanced): 14% commission, 6+ h consulting/month, unlimited menu items, 3+ promo videos. Premium branding, 3 social features/month, all trainings, B2B catering access, priority positioning, advanced analytics, dedicated account manager, homepage features & premium badges.
+
+Monthly plans (base fee + commission)
+- Basic Chef (Monthly): €25 / month + 5% commission.
+- Pro Chef (Monthly): €35 / month + 6% commission.
+- Pro Chef Plus (Monthly): €45 / month + 7% commission.
+
+Commission base:
+Commission is taken from the gross order value, which includes delivery fees and VAT.
+
+Term & renewal:
+- Yearly plans: 12-month term from signing date, auto-renewing.
+- Monthly plans: 1-month term, auto-renewing, 30-day written cancellation notice.
+- Upgrade/Downgrade: Chefs can upgrade at any time. Pro and Pro Plus can downgrade at any time.
+
+Internal commission note (Hyperzod):
+For the storefront backend, all merchants are created with a nested commission structure of 15% across delivery, pickup, and custom_1 order types (this is the platform-side default validation — the chef-facing commission is the plan rate above).
+
+3. Fees, Cancellations & Penalties
+Approachable tone ("Platform Fees & Charges"):
+- Order cancellation policy:
+  * Within the first 10 minutes: No fee. Chef must personally contact the customer to explain.
+  * After 10 minutes: €15 handling fee applies. Chef is expected to make it right (e.g. a complimentary meal on a future order).
+  * 3+ cancellations within 3 months: Homemade schedules a support call and may temporarily pause new orders.
+- Other:
+  * No platform subscription fees on yearly plans (commission only).
+  * Monthly plans charge the base fee at the start of each billing period.
+
+4. Legal & Compliance Requirements
+All chefs must comply with Dutch hobby-chef regulations:
+- HACCP: Food safety compliance is mandatory.
+- NVWA: Registration with the Dutch Food Safety Authority is mandatory.
+- KVK: Chamber of Commerce registration (8-digit KVK number) required for operating. Status options during onboarding: KVK + NVWA both, KVK only, none yet, "try first".
+- Liability insurance: Strongly recommended, minimum €1,000,000 per occurrence (general + professional liability).
+
+5. Onboarding Flow (Chef-facing, Typeform-style wizard)
+Steps in order:
+1. Welcome
+2. City
+3. Cuisine(s)
+4. Contact (email + phone — Dutch mobiles normalized to +316XXXXXXXX)
+5. Address
+6. Business name (AI-generated or manual)
+7. Logo (AI / upload / placeholder)
+8. Service type (delivery / pickup / both / unsure)
+9. Availability buckets (weekday eves, weekend eves, lunch, flexible)
+10. Dish types
+11. Food safety status (has certificate / needs training)
+12. KVK / NVWA status
+13. Plan selection
+14. Summary / account creation (silent magic-link auth)
+State is persisted in localStorage; returning users with known emails are resumed via magic link (token_hash flow, rate-limited).
+
+6. Verification Flow (after onboarding)
+Mandatory sequence — do not reorder:
+1. Menu Review: AI-generated menu (max 5 mains + culturally appropriate extras: bread/wraps, starches, non-alcoholic drinks, desserts). Chef approves / edits. Smart Merge preserves manually uploaded images on later edits.
+2. Logo Review
+3. Kitchen Check: Chef uploads 2 kitchen photos + 1 fridge photo. Gemini AI analyzes via structured tool call.
+   * Scoring bands: 95–100 Commercial/Pristine · 70–84 Good Home (Pass) · 55–69 Needs Improvement (Conditional) · <55 Fail
+   * Categories scored independently: Hygiene, Fridge Safety, Storage.
+   * Monthly re-checks managed at /kitchen-check route via magic-link.
+4. Food Safety Quiz: 5 mandatory training videos + Typeform quiz. Pass = ≥80%. Video progress saved in localStorage per chef. Passing scores shown so chefs don't retake.
+5. Upload ID (and KVK / HACCP / NVWA documents)
+6. Contract signing: typed signature + Terms + Privacy checkboxes
+7. Congrats screen
+Skipping food safety triggers an urgent admin alert.
+
+7. Admin Onboarding Pipeline (Internal, 7 steps)
+Auto-generated when a chef enters "Onboarding In Progress". Tasks cascade off verification.created_at.
+Steps:
+1. Verification (2 days)
+2. Brand Review (1 day)
+3. KVK Name Verification (admin only) (1 day)
+4. Menu (5 days)
+5. Merchant Profile (1 day)
+6. Launch Prep (5 days)
+7. Launch & Social Assets (7 days)
+Only the current active step appears in global task lists. is_task_paused hides a chef's tasks globally.
+
+8. "Online" vs "Offline" Storefront Status
+A chef/merchant shows as Online (green) only when both:
+- is_accepting_orders = true
+- Within current opening hours (is_open = true)
+Otherwise: Offline (gray). Terminology is "Online/Offline" everywhere, not "Open/Closed".
+
+9. Merchant Defaults (Storefront / Hyperzod)
+- Created inactive / offline (status = 0) by default.
+- Delivery radius: 2.5 km (2,500 m) default. Hyperzod API often ignores this and falls back to 20,000 km — must be adjusted manually in the Hyperzod Merchant Panel.
+- Tenant: X-TENANT 3331.
+- Merchant data is fetched fresh from the database at the moment of Hyperzod creation.
+
+10. AI Features Available to Chefs
+- AI business name generation (Gemini) with duplication check.
+- AI logo generation (Gemini Nano Banana) → stored in logos bucket.
+- AI menu generation — culturally authentic dishes with pricing, combos, cross-sells, upsells, restaurant comparison prices, margins.
+- AI menu modifier — natural-language prompts. Smart Merge preserves existing images.
+- AI photo-to-dish — Gemini Flash vision turns a dish photo into structured dish data.
+- AI dish image regeneration — Recraft v3.
+- AI cover image generator — Recraft v3, ultra-realistic.
+- AI marketing assets — Instagram & WhatsApp launch posters.
+- AI kitchen check — Gemini structured scoring.
+- AI lead scoring — 0–100 hotness for admin prioritization.
+- AI daily admin report + weekly performance report.
+- AI transcripts — Google Drive meeting transcripts polled every 15 min, auto-create follow-up tasks.
+
+11. Communications & Email System
+- Provider: SendGrid (delivery webhook tracks open/click/bounce per email_type).
+- WhatsApp: Twilio (E.164 numbers only) for follow-up automation with escalation cron.
+- Anti-spam: Global 2-email daily limit per chef across all automated systems.
+- Transactional emails: Sent as text/plain + simple HTML to bypass spam filters.
+- Magic links: Use token_hash in URL (bypasses PKCE storage constraints).
+- Post-verification lifecycle: Automated email series + manual "Store Live" trigger.
+- Tutorial emails: YouTube video IDs for chef training.
+- Launch Assistance email template: Sends Calendly booking link to schedule a face-to-face call with Tia.
+- Re-engagement: Segmented by timeframe.
+- Batch emails: CSV recipient parser, template variables, admin-triggered.
+
+12. Brand Identity
+- Hex Colors:
+  * Orange Peel (primary accent): #f47a44
+  * Pure Linen (background): #e5e5ce
+  * Dark Spirulina: #111c15
+  * Countryside Violet: #8291db
+  * Mellow Yellow: #fded9f
+- Headlines: bold serif, UPPERCASE.
+- Body: clean sans-serif.
+
+13. Multi-Language Support
+Locales: English (en), Dutch (nl), Arabic (ar) — Arabic includes RTL implementation.
+
+14. Admin / CRM Capabilities
+- Lead scoring: Weighted 0–100 hotness analyzer.
+- Lead assignment: Multi-admin arrays with round-robin fallback.
+- Old leads import: CSV with multi-table deduplication.
+- Catering leads: Multi-source email parsing; calendar view with color-coded confirmed/tentative/cancelled events.
+- Mentions system: Cross-platform admin @mentions.
+- Activity timeline: Database-trigger unified chef history.
+- Status notifications: DB triggers with deduplication.
+- Performance metrics: 4-factor scoring model for admins.
+- Daily / weekly reports: Auto-summarized productivity.
+- Optimistic UI: updatePendingProfile hook for instant CRM feel.
+- Deep linking: Open any chef modal via URL parameter.
+- Exports: Multi-CSV + Hyperzod-formatted menu exports.
+- AI image fraud detection: Blocklist for AI-generated filename patterns in kitchen check.
+- Drive sync: Google Drive city-nested hierarchy auto-sync.
+- Standalone tasks: is_pipeline_task: false for ad-hoc admin work.
+
+15. Storage & Data
+- Public buckets: logos, menu-images
+- Private buckets (RLS): verification-documents, kitchen-photos
+- Database: Supabase Postgres with strict RLS. Roles in user_roles table (admin / chef).
+- Phones: Strictly normalized to Dutch mobile format +316XXXXXXXX.
+- Fetching: 500-record batch loops.
+
+16. Launch Readiness Scoring
+- 0–100 readiness score with weighted blockers.
+- Statuses: launched · ready · almost · blocked · stalled · dormant
+- Dead-end statuses excluded from digest.
+- Priority-city chefs flagged as "stalled" earlier.
+
+17. Frequently Asked Questions (FAQ)
+Q: What does it cost to be on Homemade?
+A: You can choose a yearly commission-only plan (10%, 12%, or 14%) or a monthly plan that combines a small base fee (€25/€35/€45) with a lower commission (5%/6%/7%). Yearly is the default.
+
+Q: What's the commission based on?
+A: Gross order value, including delivery and VAT.
+
+Q: What happens if I cancel an order?
+A: Within the first 10 minutes — no fee, but contact the customer. After 10 minutes — a €15 handling fee, and we ask you to make it right (e.g. a free meal next order). 3+ cancellations in 3 months triggers a support call and may pause orders.
+
+Q: Do I need a KVK / NVWA / HACCP?
+A: Yes — KVK + NVWA registration and HACCP compliance are mandatory. We also recommend at least €1,000,000 liability insurance.
+
+Q: How long is the contract?
+A: Yearly plans run for 12 months from signing. Monthly plans renew each month with 30 days' notice.
+
+Q: Can I switch plans?
+A: Yes — you can upgrade any time. Pro and Pro Plus can also downgrade.
+
+Q: Can I get help during onboarding?
+A: Yes — book a call with Tia, our onboarding specialist: https://calendly.com/homemademeals-info/launch-assistance
+
+Q: How does the kitchen check work?
+A: Upload 2 kitchen photos + 1 fridge photo. Our AI scores Hygiene, Fridge Safety, and Storage. 70+ passes; 55–69 conditional; <55 fail. Re-check monthly.
+
+Q: What food-safety quiz score do I need?
+A: 80% or higher. You'll watch 5 short training videos first.
+
+Q: What does "Online" mean on the storefront?
+A: You're Online (green) only when you're accepting orders AND within your opening hours. Otherwise you're Offline (gray).

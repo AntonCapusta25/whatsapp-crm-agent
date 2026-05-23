@@ -1,0 +1,10 @@
+node_modules
+frontend/node_modules
+.wwebjs_auth
+.wwebjs_cache
+configs/*.json
+.env
+.git
+.gitignore
+inspect-booking.js
+*.log

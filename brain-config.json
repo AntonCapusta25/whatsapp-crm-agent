@@ -1,0 +1,35 @@
+{
+  "welcomeMessage": {
+    "enabled": false,
+    "template": "Hello! Thank you for reaching out. How can I help you today? 🤖"
+  },
+  "autoReply": {
+    "enabled": false,
+    "rules": [
+      {
+        "trigger": "hello",
+        "response": "Hi there! How can I assist you today?"
+      },
+      {
+        "trigger": "pricing",
+        "response": "Our pricing plans start at $19/month."
+      }
+    ]
+  },
+  "aiAgent": {
+    "enabled": false,
+    "provider": "gemini",
+    "apiKey": "",
+    "systemPrompt": "You are a helpful customer service assistant for Homemade. Keep replies short and helpful."
+  },
+  "webhook": {
+    "enabled": false,
+    "url": ""
+  },
+  "emailNotification": {
+    "enabled": true,
+    "fromEmail": "info@homemademeals.net",
+    "toEmail": "bangalexf@gmail.com",
+    "subject": "⚠️ Urgent: WhatsApp Message Needs Human Attention"
+  }
+}
