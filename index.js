@@ -676,6 +676,22 @@ class SessionManager {
         this.queues.set(tenantId, []);
         this.isProcessingQueue.set(tenantId, false);
 
+        // Pre-boot cleanup: Scrub Chromium lock files to prevent "profile in use" crashes
+        const sessionPath = path.join(__dirname, '.wwebjs_auth', `session-tenant-${tenantId}`);
+        const defaultProfilePath = path.join(sessionPath, 'Default');
+        
+        [sessionPath, defaultProfilePath].forEach(dir => {
+            if (fs.existsSync(dir)) {
+                const lockFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+                lockFiles.forEach(file => {
+                    const filePath = path.join(dir, file);
+                    try {
+                        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+                    } catch (e) {}
+                });
+            }
+        });
+
         const client = new Client({
             authStrategy: new LocalAuth({
                 clientId: `tenant-${tenantId}`,
