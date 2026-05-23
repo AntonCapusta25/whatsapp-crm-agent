@@ -1225,8 +1225,28 @@ if (crmSupabase) {
 
     const dispatchNoAnswerMessage = async (phoneStr, nameStr, recordId) => {
         if (!phoneStr || notifiedNoAnswers.has(recordId)) return;
-        notifiedNoAnswers.add(recordId);
+        
+        // Find which active sessions have noAnswerFollowupEnabled enabled in settings
+        const activeSenders = [];
+        const activeSessions = Array.from(sessionManager.sessions.keys());
+        for (const tId of activeSessions) {
+            try {
+                if (sessionManager.getStatus(tId) !== 'READY') continue;
+                const config = await getBrainConfig(tId);
+                if (config.noAnswerFollowupEnabled) {
+                    activeSenders.push(tId);
+                }
+            } catch (err) {
+                console.error(`[NoAnswer-Daemon] Error checking config for ${tId}:`, err.message);
+            }
+        }
 
+        if (activeSenders.length === 0) {
+            console.log(`[NoAnswer-Daemon] Dropping No Answer followup for ${phoneStr} - feature is disabled on all active tenants.`);
+            return;
+        }
+
+        notifiedNoAnswers.add(recordId);
         const sanitizedPhone = sanitizePhone(phoneStr);
         if (!sanitizedPhone) return;
 
@@ -1235,20 +1255,10 @@ if (crmSupabase) {
         const greeting = firstName ? `Hey ${firstName}, ` : `Hey! `;
         const messageText = `${greeting}We tried calling you regarding your Homemade application but it looks like you were not available. Let us know when is a good time to reach you, or if you prefer, we can just chat right here!`;
 
-        // We will queue this on the 'default' tenant if it's ready, or the first available READY tenant.
-        let targetTenant = 'default';
-        if (sessionManager.getStatus('default') !== 'READY') {
-            const readyTenants = Array.from(sessionManager.statuses.keys()).filter(t => sessionManager.getStatus(t) === 'READY');
-            if (readyTenants.length > 0) {
-                targetTenant = readyTenants[0];
-            } else {
-                console.log(`[NoAnswer-Daemon] Dropping No Answer followup for ${sanitizedPhone} - no tenants are READY.`);
-                return;
-            }
+        for (const senderTenantId of activeSenders) {
+            console.log(`[NoAnswer-Daemon] 📩 Queueing No Answer followup for ${sanitizedPhone} on tenant: ${senderTenantId}`);
+            sessionManager.queueMessage(senderTenantId, jid, messageText);
         }
-
-        console.log(`[NoAnswer-Daemon] 📩 Queueing No Answer followup for ${sanitizedPhone} on tenant: ${targetTenant}`);
-        sessionManager.queueMessage(targetTenant, jid, messageText);
     };
 
     try {

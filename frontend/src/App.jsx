@@ -1385,7 +1385,24 @@ export default function App() {
                 </span>
               </div>
 
-
+              {/* CRM No Answer Auto-Followup */}
+              <div style={{ marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1.2rem' }}>
+                <h3 style={{ fontSize: '1rem', color: 'var(--accent-green)', marginBottom: '0.4rem' }}>☎️ CRM "No Answer" Followup</h3>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem', marginBottom: '0.3rem' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={brainConfig.noAnswerFollowupEnabled || false}
+                    onChange={(e) => setBrainConfig({
+                      ...brainConfig,
+                      noAnswerFollowupEnabled: e.target.checked
+                    })}
+                  />
+                  <span>Automatically send WhatsApp followups when CRM status changes</span>
+                </label>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginLeft: '1.5rem' }}>
+                  When checked, this account will instantly dispatch a "Hey, we missed you" message if an admin marks a lead as <code>no_answer</code> in the CRM layer.
+                </span>
+              </div>
 
               {/* SendGrid Email Alerts */}
               <div style={{ marginBottom: '1.5rem' }}>
