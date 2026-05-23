@@ -2,61 +2,61 @@ import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 
 const getAvatarChar = (name) => {
-  if (!name) return '👤';
+  if (!name) return '';
   // Strip any leading plus and whitespace
   const clean = name.replace(/^\+/, '').trim();
   // Get first character or default to silhouette icon
-  return clean.charAt(0).toUpperCase() || '👤';
+  return clean.charAt(0).toUpperCase() || '';
 };
 
 const PRESET_ANSWERS = [
   {
-    label: "💰 Cost & Plans",
+    label: "Cost & Plans",
     title: "What does it cost to be on Homemade?",
     text: "You can choose a yearly commission-only plan (10%, 12%, or 14%) or a monthly plan that combines a small base fee (€25/€35/€45) with a lower commission (5%/6%/7%). Yearly is the default."
   },
   {
-    label: "📊 Commission",
+    label: "Commission",
     title: "What's the commission based on?",
     text: "Commission is taken from the gross order value, which includes delivery fees and VAT."
   },
   {
-    label: "❌ Cancel Order",
+    label: "Cancel Order",
     title: "What happens if I cancel an order?",
     text: "Within the first 10 minutes — no fee, but contact the customer. After 10 minutes — a €15 handling fee, and we ask you to make it right (e.g. a free meal next order). 3+ cancellations in 3 months triggers a support call and may pause orders."
   },
   {
-    label: "⚖️ KVK & NVWA",
+    label: "KVK & NVWA",
     title: "Do I need KVK / NVWA / HACCP?",
     text: "Yes — KVK + NVWA registration and HACCP compliance are mandatory. We also recommend at least €1,000,000 liability insurance."
   },
   {
-    label: "📅 Contract Term",
+    label: "Contract Term",
     title: "How long is the contract?",
     text: "Yearly plans run for 12 months from signing. Monthly plans renew each month with 30 days' notice."
   },
   {
-    label: "🔄 Switch Plans",
+    label: "Switch Plans",
     title: "Can I switch plans?",
     text: "Yes — you can upgrade any time. Pro and Pro Plus can also downgrade."
   },
   {
-    label: "📞 Tia Onboarding",
+    label: "Tia Onboarding",
     title: "Can I get help during onboarding?",
     text: "Yes — book a call with Tia, our onboarding specialist: https://calendly.com/homemademeals-info/launch-assistance"
   },
   {
-    label: "🍳 Kitchen Check",
+    label: "Kitchen Check",
     title: "How does the kitchen check work?",
     text: "Upload 2 kitchen photos + 1 fridge photo. Our AI scores Hygiene, Fridge Safety, and Storage. 70+ passes; 55–69 conditional; <55 fail. Re-check monthly."
   },
   {
-    label: "🧪 Safety Quiz",
+    label: "Safety Quiz",
     title: "What food-safety quiz score do I need?",
     text: "80% or higher. You'll watch 5 short training videos first."
   },
   {
-    label: "🟢 Online Status",
+    label: "Online Status",
     title: "What does 'Online' mean on the storefront?",
     text: "You're Online (green) only when you're accepting orders AND within your opening hours. Otherwise you're Offline (gray)."
   }
@@ -558,24 +558,24 @@ export default function App() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <button 
               onClick={loadChats} 
-              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem', padding: '4px 8px', display: 'flex', alignItems: 'center', color: 'var(--text-main)' }}
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem', padding: '4px 8px', display: 'flex', alignItems: 'center', color: 'var(--text-main)', fontWeight: 500 }}
               title="Force Refresh Chats"
             >
-              🔄
+              Refresh
             </button>
             <button 
               onClick={() => { setShowCampaigns(true); loadCampaignProfiles(); }} 
-              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem', padding: '4px 8px', display: 'flex', alignItems: 'center', color: 'var(--text-main)' }}
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem', padding: '4px 8px', display: 'flex', alignItems: 'center', color: 'var(--text-main)', fontWeight: 500 }}
               title="Batch Campaign Manager"
             >
-              📢
+              Campaigns
             </button>
             <button 
               onClick={() => setShowSettings(true)} 
-              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem', padding: '4px 8px', display: 'flex', alignItems: 'center', color: 'var(--text-main)' }}
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem', padding: '4px 8px', display: 'flex', alignItems: 'center', color: 'var(--text-main)', fontWeight: 500 }}
               title="Agent Brain Settings"
             >
-              ⚙️
+              Settings
             </button>
           </div>
         </div>
@@ -732,7 +732,7 @@ export default function App() {
         {/* Search */}
         <div className="search-container">
           <div className="search-box">
-            <span>🔍</span>
+            <span></span>
             <input 
               type="text" 
               className="search-input" 
@@ -1186,7 +1186,7 @@ export default function App() {
               border: '1px dashed rgba(255,255,255,0.1)',
               padding: '2rem 1rem'
             }}>
-              <div style={{ fontSize: '3rem', marginBottom: '1rem', opacity: 0.5 }}>🔍</div>
+              <div style={{ fontSize: '3rem', marginBottom: '1rem', opacity: 0.5 }}></div>
               <div style={{ fontWeight: 600, color: '#fff', marginBottom: '0.5rem' }}>No CRM Profile Found</div>
               <div style={{ fontSize: '0.85rem', lineHeight: '1.4' }}>This WhatsApp number is not registered as an active Chef in the database.</div>
             </div>
@@ -1216,7 +1216,7 @@ export default function App() {
               
               {/* Profile Identity Name */}
               <div style={{ marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1.2rem' }}>
-                <h3 style={{ fontSize: '1rem', color: 'var(--accent-green)', marginBottom: '0.4rem' }}>👤 Profile Identity</h3>
+                <h3 style={{ fontSize: '1rem', color: 'var(--accent-green)', marginBottom: '0.4rem' }}> Profile Identity</h3>
                 <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.6rem' }}>
                   Give this WhatsApp session / tenant ID a friendly nickname (e.g., "Main Sales Line", "Adomas Account") so you can switch easily.
                 </span>
@@ -1466,7 +1466,7 @@ export default function App() {
           <div style={{ backgroundColor: 'var(--bg-chat)', border: '1px solid var(--border-color)', borderRadius: '12px', width: '90%', maxWidth: '800px', maxHeight: '90vh', overflowY: 'auto', padding: '2rem', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.04)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem' }}>
               <h2 style={{ margin: 0, color: 'var(--text-main)', fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                📢 Batch Campaign Manager <span style={{ fontSize: '0.8rem', background: 'var(--hover-chat)', padding: '2px 8px', borderRadius: '4px', color: 'var(--text-muted)' }}>{tenantId}</span>
+                Batch Campaign Manager <span style={{ fontSize: '0.8rem', background: 'var(--hover-chat)', padding: '2px 8px', borderRadius: '4px', color: 'var(--text-muted)' }}>{tenantId}</span>
               </h2>
               <button onClick={() => setShowCampaigns(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '1.5rem', cursor: 'pointer' }}>×</button>
             </div>
