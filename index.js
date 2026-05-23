@@ -730,6 +730,17 @@ class SessionManager {
             this.syncMsgs.set(tenantId, message);
             broadcastSSE({ type: 'sync', tenantId, percent: pct, message });
             broadcastSSE({ type: 'status', tenantId, status: 'SYNCING' });
+            
+            // Fix for stuck SYNCING state
+            if (pct >= 99) {
+                setTimeout(() => {
+                    if (this.statuses.get(tenantId) === 'SYNCING') {
+                        console.log(`[Sessions] 🚀 Auto-reverting status to READY for tenant ${tenantId} after sync completion.`);
+                        this.statuses.set(tenantId, 'READY');
+                        broadcastSSE({ type: 'status', tenantId, status: 'READY' });
+                    }
+                }, 3000);
+            }
         });
 
         client.on('ready', () => {
