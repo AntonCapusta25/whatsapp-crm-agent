@@ -64,6 +64,12 @@ const PRESET_ANSWERS = [
 
 export default function App() {
   const [tenantId, setTenantId] = useState(localStorage.getItem('whatsapp_tenant_id') || 'default');
+  const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('agent_auth_token'));
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  
   const [status, setStatus] = useState('INITIALIZING');
   const [qrText, setQrText] = useState('');
   const [syncPercent, setSyncPercent] = useState(0);
@@ -71,6 +77,157 @@ export default function App() {
   const [tenantsList, setTenantsList] = useState([{ id: 'default', name: 'default' }]);
   const [isCreatingNewTenant, setIsCreatingNewTenant] = useState(false);
   const [newTenantName, setNewTenantName] = useState('');
+
+  const apiFetch = async (url, options = {}) => {
+    const token = localStorage.getItem("agent_auth_token");
+    const headers = { ...options.headers };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    const res = await fetch(url, { ...options, headers });
+    if (res.status === 401 && url !== "/api/auth/login") {
+      setIsAuthenticated(false);
+      localStorage.removeItem("agent_auth_token");
+    }
+    return res;
+  };
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setIsAuthenticating(true);
+    setAuthError('');
+    try {
+      const response = await apiFetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: authEmail, password: authPassword })
+      });
+      const data = await response.json();
+      
+      if (response.ok && data.success) {
+        localStorage.setItem('agent_auth_token', data.token);
+        setIsAuthenticated(true);
+      } else {
+        setAuthError(data.error || 'Invalid credentials');
+      }
+    } catch (err) {
+      setAuthError('Network error connecting to authentication server.');
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  const apiFetch = async (url, options = {}) => {
+    const token = localStorage.getItem('agent_auth_token');
+    const headers = { ...options.headers };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const res = await fetch(url, { ...options, headers });
+    if (res.status === 401 && url !== '/api/auth/login') {
+      setIsAuthenticated(false);
+      localStorage.removeItem('agent_auth_token');
+    }
+    return res;
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <div className="app-container" style={{ justifyContent: 'center', alignItems: 'center', backgroundImage: 'radial-gradient(circle at center, #111b21 0%, #0b141a 100%)' }}>
+        <div style={{
+          background: 'rgba(28, 28, 30, 0.4)',
+          backdropFilter: 'blur(24px)',
+          WebkitBackdropFilter: 'blur(24px)',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          borderRadius: '16px',
+          padding: '2.5rem',
+          width: '100%',
+          maxWidth: '400px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '1.5rem',
+          boxShadow: '0 20px 40px rgba(0,0,0,0.4)'
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
+            <div className="avatar" style={{ background: 'linear-gradient(135deg, #00a884 0%, #128c7e 100%)', width: '64px', height: '64px', fontSize: '1.5rem', fontWeight: 700, borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', color: 'white' }}>
+              WA
+            </div>
+            <h2 style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--text-main)', margin: 0 }}>Agent CRM Login</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: 0 }}>Authenticate to access tenant management</p>
+          </div>
+
+          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {authError && (
+              <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', color: '#f87171', padding: '0.75rem', borderRadius: '8px', fontSize: '0.85rem', textAlign: 'center' }}>
+                {authError}
+              </div>
+            )}
+            
+            <input 
+              type="email" 
+              placeholder="Admin Email" 
+              value={authEmail}
+              onChange={(e) => setAuthEmail(e.target.value)}
+              required
+              style={{
+                padding: '0.85rem 1rem',
+                borderRadius: '8px',
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'rgba(0,0,0,0.2)',
+                color: 'var(--text-main)',
+                fontSize: '0.95rem',
+                outline: 'none',
+                transition: 'border-color 0.2s ease'
+              }}
+              onFocus={(e) => e.target.style.borderColor = 'var(--accent-green)'}
+              onBlur={(e) => e.target.style.borderColor = 'var(--border-color)'}
+            />
+            
+            <input 
+              type="password" 
+              placeholder="Master Password" 
+              value={authPassword}
+              onChange={(e) => setAuthPassword(e.target.value)}
+              required
+              style={{
+                padding: '0.85rem 1rem',
+                borderRadius: '8px',
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'rgba(0,0,0,0.2)',
+                color: 'var(--text-main)',
+                fontSize: '0.95rem',
+                outline: 'none',
+                transition: 'border-color 0.2s ease'
+              }}
+              onFocus={(e) => e.target.style.borderColor = 'var(--accent-green)'}
+              onBlur={(e) => e.target.style.borderColor = 'var(--border-color)'}
+            />
+            
+            <button 
+              type="submit" 
+              disabled={isAuthenticating}
+              style={{
+                marginTop: '0.5rem',
+                padding: '0.85rem',
+                borderRadius: '8px',
+                border: 'none',
+                backgroundColor: 'var(--accent-green)',
+                color: 'white',
+                fontWeight: 600,
+                fontSize: '1rem',
+                cursor: isAuthenticating ? 'not-allowed' : 'pointer',
+                opacity: isAuthenticating ? 0.7 : 1,
+                transition: 'opacity 0.2s ease'
+              }}
+            >
+              {isAuthenticating ? 'Authenticating...' : 'Sign In'}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   
   const [chats, setChats] = useState([]);
   const [activeChat, setActiveChat] = useState(null);
@@ -101,7 +258,7 @@ export default function App() {
 
   const loadCampaignProfiles = async () => {
     try {
-      const res = await fetch('/api/crm/profiles');
+      const res = await apiFetch('/api/crm/profiles');
       const data = await res.json();
       if (res.ok && data.success) {
         setCampaignProfiles(data.profiles);
@@ -119,7 +276,7 @@ export default function App() {
     const phones = Array.from(selectedCampaignProfiles);
     
     try {
-      const res = await fetch(`/api/${tenantId}/campaign/send`, {
+      const res = await apiFetch(`/api/${tenantId}/campaign/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phones, message: campaignMessage.trim() })
@@ -148,7 +305,7 @@ export default function App() {
   // Fetch list of known tenants from backend consolidated store
   const loadTenants = async () => {
     try {
-      const res = await fetch('/api/tenants');
+      const res = await apiFetch('/api/tenants');
       const data = await res.json();
       if (res.ok && data.success) {
         setTenantsList(data.tenants);
@@ -165,7 +322,7 @@ export default function App() {
   // Load Brain Config
   const loadBrainConfig = async () => {
     try {
-      const res = await fetch(`/api/${tenantId}/config`);
+      const res = await apiFetch(`/api/${tenantId}/config`);
       const data = await res.json();
       if (res.ok && data.success) {
         setBrainConfig(data.config);
@@ -181,7 +338,7 @@ export default function App() {
 
   const saveBrainConfig = async (newConfig) => {
     try {
-      const res = await fetch(`/api/${tenantId}/config`, {
+      const res = await apiFetch(`/api/${tenantId}/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newConfig)
@@ -203,7 +360,7 @@ export default function App() {
   // Fetch Chats once Ready
   const loadChats = async () => {
     try {
-      const res = await fetch(`/api/${tenantId}/chats`);
+      const res = await apiFetch(`/api/${tenantId}/chats`);
       const data = await res.json();
       if (res.ok && data.success) {
         setChats(data.chats);
@@ -236,7 +393,7 @@ export default function App() {
 
     const fetchHistory = async () => {
       try {
-        const res = await fetch(`/api/${tenantId}/history/jid/${encodeURIComponent(activeChat.id)}`);
+        const res = await apiFetch(`/api/${tenantId}/history/jid/${encodeURIComponent(activeChat.id)}`);
         const data = await res.json();
         if (res.ok && data.success) {
           setMessages(data.messages);
@@ -253,7 +410,7 @@ export default function App() {
       }
       setLoadingSuggestion(true);
       try {
-        const res = await fetch(`/api/${tenantId}/suggest-response`, {
+        const res = await apiFetch(`/api/${tenantId}/suggest-response`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ jid: activeChat.id })
@@ -276,7 +433,7 @@ export default function App() {
       setLoadingCrm(true);
       setCrmError('');
       try {
-        const res = await fetch(`/api/${tenantId}/crm-context/${encodeURIComponent(activeChat.id)}`);
+        const res = await apiFetch(`/api/${tenantId}/crm-context/${encodeURIComponent(activeChat.id)}`);
         const data = await res.json();
         if (res.ok && data.success) {
           if (data.context) {
@@ -313,7 +470,7 @@ export default function App() {
   const initializeSession = async () => {
     try {
       setStatus('INITIALIZING');
-      const res = await fetch(`/api/${tenantId}/initialize`, { method: 'POST' });
+      const res = await apiFetch(`/api/${tenantId}/initialize`, { method: 'POST' });
       if (!res.ok) {
         console.error('Failed to initialize session');
       }
@@ -329,7 +486,7 @@ export default function App() {
     }
     try {
       setStatus('INITIALIZING');
-      const res = await fetch(`/api/${tenantId}/logout`, { method: 'POST' });
+      const res = await apiFetch(`/api/${tenantId}/logout`, { method: 'POST' });
       if (res.ok) {
         setChats([]);
         setActiveChat(null);
@@ -464,7 +621,7 @@ export default function App() {
     }]);
 
     try {
-      const res = await fetch(`/api/${tenantId}/send`, {
+      const res = await apiFetch(`/api/${tenantId}/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jid: activeChat.id, message: msgBody })
@@ -730,7 +887,7 @@ export default function App() {
                       setChats([]);
                       setIsCreatingNewTenant(false);
                       setStatus('INITIALIZING');
-                      fetch(`/api/${name}/initialize`, { method: 'POST' }).catch(console.error);
+                      apiFetch(`/api/${name}/initialize`, { method: 'POST' }).catch(console.error);
                     }
                   }}
                   style={{
@@ -889,7 +1046,7 @@ export default function App() {
                         fromMe: true,
                         timestamp: Math.floor(Date.now() / 1000)
                       }]);
-                      await fetch('/api/send', {
+                      await apiFetch('/api/send', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ jid: activeChat.id, message: msgText })

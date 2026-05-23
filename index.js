@@ -22,6 +22,70 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'frontend/dist')));
 
 // ------------------------------------------------------------------
+// Authentication API & Middleware
+// ------------------------------------------------------------------
+app.post('/api/auth/login', async (req, res) => {
+    const { email, password } = req.body;
+    if (!email || !password) {
+        return res.status(400).json({ error: 'Email and password required' });
+    }
+    
+    if (!supabase) {
+        return res.status(500).json({ error: 'Supabase is not configured on the server' });
+    }
+
+    try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+            email,
+            password,
+        });
+
+        if (error) {
+            return res.status(401).json({ error: error.message });
+        }
+
+        // Return basic session info to frontend
+        res.json({ success: true, token: data.session.access_token, user: data.user });
+    } catch (err) {
+        console.error('Login error:', err);
+        res.status(500).json({ error: 'Internal server error during login' });
+    }
+});
+
+// Middleware to protect API routes
+const requireAuth = async (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Missing or invalid authentication token' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    
+    if (!supabase) {
+        return res.status(500).json({ error: 'Supabase not configured' });
+    }
+
+    try {
+        const { data: { user }, error } = await supabase.auth.getUser(token);
+        if (error || !user) {
+            return res.status(401).json({ error: 'Invalid or expired token' });
+        }
+        req.user = user;
+        next();
+    } catch (err) {
+        res.status(500).json({ error: 'Server error during authentication validation' });
+    }
+};
+
+// Apply auth middleware to all API routes except login
+app.use('/api', (req, res, next) => {
+    if (req.path === '/auth/login') {
+        return next();
+    }
+    requireAuth(req, res, next);
+});
+
+// ------------------------------------------------------------------
 // Supabase Integration Setup
 // ------------------------------------------------------------------
 let supabaseUrl = process.env.SUPABASE_URL;
@@ -678,6 +742,8 @@ class SessionManager {
         this.isProcessingQueue.set(tenantId, false);
 
         // Pre-boot cleanup: Scrub Chromium lock files to prevent "profile in use" crashes
+        // We do NOT use fs.existsSync on the file itself because SingletonLock is often a symlink. 
+        // If the target process is dead, existsSync returns false, and the broken symlink is never deleted!
         const sessionPath = path.join(__dirname, '.wwebjs_auth', `session-tenant-${tenantId}`);
         const defaultProfilePath = path.join(sessionPath, 'Default');
         
@@ -687,7 +753,7 @@ class SessionManager {
                 lockFiles.forEach(file => {
                     const filePath = path.join(dir, file);
                     try {
-                        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+                        fs.unlinkSync(filePath); // Just attempt to delete, catch handles if it doesn't exist
                     } catch (e) {}
                 });
             }
