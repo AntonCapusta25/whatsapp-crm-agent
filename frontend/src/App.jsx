@@ -547,44 +547,24 @@ export default function App() {
       {/* Sidebar */}
       <div className="sidebar">
         {/* Top Header */}
-        <div className="sidebar-header" style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', background: 'var(--panel-bg)' }}>
-          <div className="user-profile" style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-            <div className="avatar" style={{ background: 'linear-gradient(135deg, #00a884 0%, #128c7e 100%)', width: '36px', height: '36px', minWidth: '36px', minHeight: '36px' }}>🤖</div>
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-main)' }}>WhatsApp Agent</span>
-              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Tenant Management</span>
+        <div className="sidebar-header" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '0.75rem 1rem', borderBottom: '1px solid var(--border-color)', background: 'var(--panel-bg)' }}>
+          <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div className="user-profile" style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+              <div className="avatar" style={{ background: 'linear-gradient(135deg, #00a884 0%, #128c7e 100%)', width: '32px', height: '32px', minWidth: '32px', minHeight: '32px' }}>🤖</div>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-main)' }}>WhatsApp Agent</span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <button onClick={loadChats} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', padding: '4px 8px', color: 'var(--text-main)', fontWeight: 500 }} title="Force Refresh Chats">Refresh</button>
+              <button onClick={() => { setShowCampaigns(true); loadCampaignProfiles(); }} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', padding: '4px 8px', color: 'var(--text-main)', fontWeight: 500 }} title="Batch Campaign Manager">Campaigns</button>
+              <button onClick={() => setShowSettings(true)} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', padding: '4px 8px', color: 'var(--text-main)', fontWeight: 500 }} title="Agent Brain Settings">Settings</button>
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <button 
-              onClick={loadChats} 
-              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem', padding: '4px 8px', display: 'flex', alignItems: 'center', color: 'var(--text-main)', fontWeight: 500 }}
-              title="Force Refresh Chats"
-            >
-              Refresh
-            </button>
-            <button 
-              onClick={() => { setShowCampaigns(true); loadCampaignProfiles(); }} 
-              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem', padding: '4px 8px', display: 'flex', alignItems: 'center', color: 'var(--text-main)', fontWeight: 500 }}
-              title="Batch Campaign Manager"
-            >
-              Campaigns
-            </button>
-            <button 
-              onClick={() => setShowSettings(true)} 
-              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem', padding: '4px 8px', display: 'flex', alignItems: 'center', color: 'var(--text-main)', fontWeight: 500 }}
-              title="Agent Brain Settings"
-            >
-              Settings
-            </button>
-          </div>
-        </div>
 
-        {/* Tenant Configuration Control Panel */}
-        <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.6rem', background: 'var(--hover-chat)' }}>
+          {/* Tenant Configuration Control Panel (Merged) */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Active Tenant</span>
-            <div className="status-badge" style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '0.65rem' }}>
+            <div className="status-badge" style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem', background: 'transparent', border: 'none', marginLeft: '-4px' }}>
               <div className={`status-dot ${status === 'READY' ? 'ready' : ''}`}></div>
               <span style={{ color: 'var(--text-main)', fontWeight: 600 }}>{status}</span>
             </div>
