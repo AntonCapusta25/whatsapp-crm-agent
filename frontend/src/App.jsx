@@ -547,8 +547,8 @@ export default function App() {
       {/* Sidebar */}
       <div className="sidebar">
         {/* Top Header & Navigation Dashboard */}
-        <div className="sidebar-header" style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', padding: '1.25rem 1rem 1rem 1rem', borderBottom: '1px solid var(--border-color)', background: 'var(--panel-bg)' }}>
-          
+        {/* Top Header - Ultra Minimal */}
+        <div className="sidebar-header" style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', padding: '1rem', borderBottom: '1px solid var(--border-color)', background: 'var(--panel-bg)', minHeight: 'auto', height: 'auto' }}>
           {/* Row 1: Agent Identity & Status */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div className="user-profile" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -563,151 +563,6 @@ export default function App() {
                 </div>
               </div>
             </div>
-          </div>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', width: '100%' }}>
-            {!isCreatingNewTenant ? (
-              <div style={{ display: 'flex', gap: '0.4rem', width: '100%' }}>
-                <select
-                  value={tenantId}
-                  onChange={(e) => {
-                    if (e.target.value === 'CREATE_NEW') {
-                      setIsCreatingNewTenant(true);
-                      setNewTenantName('');
-                    } else {
-                      setTenantId(e.target.value);
-                      setActiveChat(null);
-                      setMessages([]);
-                      setCrmContext(null);
-                      setChats([]);
-                    }
-                  }}
-                  style={{
-                    flex: 1,
-                    padding: '0.45rem 0.65rem',
-                    fontSize: '0.85rem',
-                    borderRadius: '6px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'var(--bg-chat)',
-                    color: 'var(--text-white)',
-                    outline: 'none',
-                    cursor: 'pointer'
-                  }}
-                >
-                  {tenantsList.map(t => (
-                    <option key={t.id} value={t.id}>{t.name} ({t.id})</option>
-                  ))}
-                  <option value="CREATE_NEW">➕ Create New Tenant...</option>
-                </select>
-                
-                {status !== 'READY' && status !== 'QR_READY' && status !== 'SYNCING' && status !== 'AUTHENTICATED' && (
-                  <button 
-                    onClick={initializeSession}
-                    style={{
-                      padding: '0.45rem 0.75rem',
-                      fontSize: '0.75rem',
-                      borderRadius: '6px',
-                      backgroundColor: 'var(--accent-green)',
-                      color: 'white',
-                      border: 'none',
-                      cursor: 'pointer',
-                      fontWeight: 700
-                    }}
-                  >
-                    Connect
-                  </button>
-                )}
-                {(status === 'READY' || status === 'QR_READY' || status === 'SYNCING') && (
-                  <button 
-                    onClick={logoutSession}
-                    style={{
-                      padding: '0.45rem 0.75rem',
-                      fontSize: '0.75rem',
-                      borderRadius: '6px',
-                      backgroundColor: '#ef4444',
-                      color: 'white',
-                      border: 'none',
-                      cursor: 'pointer',
-                      fontWeight: 700
-                    }}
-                  >
-                    Logout
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div style={{ display: 'flex', gap: '0.4rem', width: '100%' }}>
-                <input 
-                  type="text" 
-                  value={newTenantName}
-                  onChange={(e) => setNewTenantName(e.target.value)}
-                  placeholder="New Account Name..." 
-                  style={{
-                    flex: 1,
-                    padding: '0.45rem 0.65rem',
-                    fontSize: '0.8rem',
-                    borderRadius: '6px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'var(--bg-chat)',
-                    color: 'var(--text-white)'
-                  }}
-                />
-                <button
-                  onClick={() => {
-                    if (newTenantName.trim()) {
-                      const rawName = newTenantName.trim();
-                      const name = rawName.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-');
-                      if (!tenantsList.some(t => t.id === name)) {
-                        setTenantsList(prev => [...prev, { id: name, name: rawName }]);
-                      }
-                      setTenantId(name);
-                      setActiveChat(null);
-                      setMessages([]);
-                      setCrmContext(null);
-                      setChats([]);
-                      setIsCreatingNewTenant(false);
-                      // Auto-start connection sequence
-                      setStatus('INITIALIZING');
-                      fetch(`/api/${name}/initialize`, { method: 'POST' }).catch(console.error);
-                    }
-                  }}
-                  style={{
-                    padding: '0.45rem 0.75rem',
-                    fontSize: '0.75rem',
-                    borderRadius: '6px',
-                    backgroundColor: 'var(--accent-green)',
-                    color: 'white',
-                    border: 'none',
-                    cursor: 'pointer',
-                    fontWeight: 700
-                  }}
-                >
-                  Add & Connect
-                </button>
-                <button
-                  onClick={() => setIsCreatingNewTenant(false)}
-                  style={{
-                    padding: '0.45rem 0.75rem',
-                    fontSize: '0.75rem',
-                    borderRadius: '6px',
-                    backgroundColor: 'rgba(255,255,255,0.1)',
-                    color: 'var(--text-main)',
-                    border: '1px solid var(--border-color)',
-                    cursor: 'pointer',
-                    fontWeight: 500
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
-          </div>
-          
-          {/* Row 3: Action Buttons */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem', width: '100%', marginTop: '0.25rem' }}>
-            <button onClick={loadChats} style={{ background: 'var(--active-chat)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', padding: '8px 0', color: 'var(--text-main)', fontWeight: 600, textAlign: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.2)' }} title="Force Refresh Chats">Refresh</button>
-            <button onClick={() => { setShowCampaigns(true); loadCampaignProfiles(); }} style={{ background: 'var(--active-chat)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', padding: '8px 0', color: 'var(--text-main)', fontWeight: 600, textAlign: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.2)' }} title="Batch Campaign Manager">Campaigns</button>
-            <button onClick={() => setShowSettings(true)} style={{ background: 'var(--active-chat)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', padding: '8px 0', color: 'var(--text-main)', fontWeight: 600, textAlign: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.2)' }} title="Agent Brain Settings">Settings</button>
           </div>
         </div>
 
@@ -769,6 +624,154 @@ export default function App() {
             <div className="placeholder-text" style={{marginTop: '2rem', textAlign: 'center', color: 'var(--text-muted)'}}>No chats found.</div>
           )}
         </div>
+
+        {/* Bottom Menu / Footer - Emulating Mobile Tab Bar */}
+        <div className="sidebar-footer" style={{ borderTop: '1px solid var(--border-color)', background: 'var(--panel-bg)', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', width: '100%' }}>
+            {!isCreatingNewTenant ? (
+              <div style={{ display: 'flex', gap: '0.4rem', width: '100%' }}>
+                <select
+                  value={tenantId}
+                  onChange={(e) => {
+                    if (e.target.value === 'CREATE_NEW') {
+                      setIsCreatingNewTenant(true);
+                      setNewTenantName('');
+                    } else {
+                      setTenantId(e.target.value);
+                      setActiveChat(null);
+                      setMessages([]);
+                      setCrmContext(null);
+                      setChats([]);
+                    }
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: '0.6rem 0.75rem',
+                    fontSize: '0.85rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-chat)',
+                    color: 'var(--text-main)',
+                    outline: 'none',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {tenantsList.map(t => (
+                    <option key={t.id} value={t.id}>{t.name} ({t.id})</option>
+                  ))}
+                  <option value="CREATE_NEW">➕ Create New Tenant...</option>
+                </select>
+                
+                {status !== 'READY' && status !== 'QR_READY' && status !== 'SYNCING' && status !== 'AUTHENTICATED' && (
+                  <button 
+                    onClick={initializeSession}
+                    style={{
+                      padding: '0.6rem 1rem',
+                      fontSize: '0.85rem',
+                      borderRadius: '8px',
+                      backgroundColor: 'var(--accent-green)',
+                      color: 'white',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontWeight: 700
+                    }}
+                  >
+                    Connect
+                  </button>
+                )}
+                {(status === 'READY' || status === 'QR_READY' || status === 'SYNCING') && (
+                  <button 
+                    onClick={logoutSession}
+                    style={{
+                      padding: '0.6rem 1rem',
+                      fontSize: '0.85rem',
+                      borderRadius: '8px',
+                      backgroundColor: '#ef4444',
+                      color: 'white',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontWeight: 700
+                    }}
+                  >
+                    Logout
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: '0.4rem', width: '100%' }}>
+                <input 
+                  type="text" 
+                  value={newTenantName}
+                  onChange={(e) => setNewTenantName(e.target.value)}
+                  placeholder="New Account Name..." 
+                  style={{
+                    flex: 1,
+                    padding: '0.6rem 0.75rem',
+                    fontSize: '0.85rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-chat)',
+                    color: 'var(--text-main)'
+                  }}
+                />
+                <button
+                  onClick={() => {
+                    if (newTenantName.trim()) {
+                      const rawName = newTenantName.trim();
+                      const name = rawName.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-');
+                      if (!tenantsList.some(t => t.id === name)) {
+                        setTenantsList(prev => [...prev, { id: name, name: rawName }]);
+                      }
+                      setTenantId(name);
+                      setActiveChat(null);
+                      setMessages([]);
+                      setCrmContext(null);
+                      setChats([]);
+                      setIsCreatingNewTenant(false);
+                      setStatus('INITIALIZING');
+                      fetch(`/api/${name}/initialize`, { method: 'POST' }).catch(console.error);
+                    }
+                  }}
+                  style={{
+                    padding: '0.6rem 1rem',
+                    fontSize: '0.85rem',
+                    borderRadius: '8px',
+                    backgroundColor: 'var(--accent-green)',
+                    color: 'white',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontWeight: 700
+                  }}
+                >
+                  Add
+                </button>
+                <button
+                  onClick={() => setIsCreatingNewTenant(false)}
+                  style={{
+                    padding: '0.6rem 1rem',
+                    fontSize: '0.85rem',
+                    borderRadius: '8px',
+                    backgroundColor: 'rgba(255,255,255,0.1)',
+                    color: 'var(--text-main)',
+                    border: '1px solid var(--border-color)',
+                    cursor: 'pointer',
+                    fontWeight: 500
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+          
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem', width: '100%' }}>
+            <button onClick={loadChats} style={{ background: 'var(--active-chat)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', padding: '10px 0', color: 'var(--text-main)', fontWeight: 600, textAlign: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.2)' }} title="Force Refresh Chats">Refresh</button>
+            <button onClick={() => { setShowCampaigns(true); loadCampaignProfiles(); }} style={{ background: 'var(--active-chat)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', padding: '10px 0', color: 'var(--text-main)', fontWeight: 600, textAlign: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.2)' }} title="Batch Campaign Manager">Campaigns</button>
+            <button onClick={() => setShowSettings(true)} style={{ background: 'var(--active-chat)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', padding: '10px 0', color: 'var(--text-main)', fontWeight: 600, textAlign: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.2)' }} title="Agent Brain Settings">Settings</button>
+          </div>
+        </div>
+
       </div>
 
       {/* Active Chat Window */}
