@@ -33,8 +33,7 @@ USER pptruser
 # Expose server port
 EXPOSE 3005
 
-# Configure chromium paths
-ENV PUPPETEER_EXECUTABLE_PATH="/usr/bin/google-chrome-stable"
+# Configure Chromium paths
 ENV PORT=3005
 
 # Start command
