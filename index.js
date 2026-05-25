@@ -424,6 +424,22 @@ function sanitizePhone(phone) {
     if (cleaned.startsWith('00')) {
         cleaned = cleaned.substring(2);
     }
+    // Handle Dutch country code +31 (0) formatting where (0) becomes 310...
+    if (cleaned.startsWith('310') && cleaned.length >= 10) {
+        cleaned = '31' + cleaned.substring(3);
+    }
+    // Convert local Dutch mobile (06...) to international (316...)
+    if (cleaned.startsWith('06') && cleaned.length === 10) {
+        cleaned = '316' + cleaned.substring(2);
+    } 
+    // Convert local Dutch mobile without leading 0 (6...) to international (316...)
+    else if (cleaned.startsWith('6') && cleaned.length === 9) {
+        cleaned = '316' + cleaned.substring(1);
+    } 
+    // Convert other local Dutch numbers (0...) to international (31...)
+    else if (cleaned.startsWith('0') && cleaned.length >= 9) {
+        cleaned = '31' + cleaned.substring(1);
+    }
     return cleaned;
 }
 
