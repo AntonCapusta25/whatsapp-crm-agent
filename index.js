@@ -493,28 +493,34 @@ async function getChefContext(jid, client = null) {
         const match = targetJid.match(/^(\d+)@c\.us$/);
         if (match) {
             const rawPhone = match[1];
-            const phoneWithPlus = '+' + rawPhone;
+            const digits = rawPhone.replace(/\D/g, '');
+            let data = null;
+            let error = null;
 
-            // Generate local format if Dutch mobile (316 -> 06)
-            let localPhone = '';
-            if (rawPhone.startsWith('316')) {
-                localPhone = '06' + rawPhone.substring(3);
+            if (digits.length >= 8) {
+                const last8 = digits.substring(digits.length - 8);
+                const pattern = '%' + last8.split('').join('%') + '%';
+                console.log(`[CRM] Querying Supabase 'chef_profiles' with wildcard: ${pattern}`);
+                const res = await crmSupabase
+                    .from('chef_profiles')
+                    .select('*, chef_verification(*), chef_onboarding_steps(*)')
+                    .ilike('contact_phone', pattern)
+                    .order('created_at', { ascending: false })
+                    .limit(1);
+                data = res.data;
+                error = res.error;
+            } else {
+                let orQuery = `contact_phone.eq.+${digits},contact_phone.eq.${digits}`;
+                console.log(`[CRM] Querying Supabase 'chef_profiles' with fallback exact or: ${orQuery}`);
+                const res = await crmSupabase
+                    .from('chef_profiles')
+                    .select('*, chef_verification(*), chef_onboarding_steps(*)')
+                    .or(orQuery)
+                    .order('created_at', { ascending: false })
+                    .limit(1);
+                data = res.data;
+                error = res.error;
             }
-
-            // Build query
-            let orQuery = `contact_phone.eq.${phoneWithPlus},contact_phone.eq.${rawPhone}`;
-            if (localPhone) orQuery += `,contact_phone.eq.${localPhone}`;
-
-            console.log(`[CRM] Querying Supabase 'chef_profiles' for phone variants: ${orQuery}`);
-
-            // Use limit(1) instead of .single() because users often have multiple test accounts 
-            // with the same phone number, which causes .single() to crash with HTTP 406!
-            let { data, error } = await crmSupabase
-                .from('chef_profiles')
-                .select('*, chef_verification(*), chef_onboarding_steps(*)')
-                .or(orQuery)
-                .order('created_at', { ascending: false })
-                .limit(1);
 
             if (data && data.length > 0) {
                 const profile = data[0];
@@ -560,26 +566,34 @@ async function getCateringLeadContext(jid, client = null) {
         const match = targetJid.match(/^(\d+)@c\.us$/);
         if (match) {
             const rawPhone = match[1];
-            const phoneWithPlus = '+' + rawPhone;
+            const digits = rawPhone.replace(/\D/g, '');
+            let data = null;
+            let error = null;
 
-            // Generate local format if Dutch mobile (316 -> 06)
-            let localPhone = '';
-            if (rawPhone.startsWith('316')) {
-                localPhone = '06' + rawPhone.substring(3);
+            if (digits.length >= 8) {
+                const last8 = digits.substring(digits.length - 8);
+                const pattern = '%' + last8.split('').join('%') + '%';
+                console.log(`[CRM] Querying Supabase 'catering_leads' with wildcard: ${pattern}`);
+                const res = await crmSupabase
+                    .from('catering_leads')
+                    .select('*')
+                    .ilike('phone', pattern)
+                    .order('created_at', { ascending: false })
+                    .limit(1);
+                data = res.data;
+                error = res.error;
+            } else {
+                let orQuery = `phone.eq.+${digits},phone.eq.${digits}`;
+                console.log(`[CRM] Querying Supabase 'catering_leads' with fallback exact or: ${orQuery}`);
+                const res = await crmSupabase
+                    .from('catering_leads')
+                    .select('*')
+                    .or(orQuery)
+                    .order('created_at', { ascending: false })
+                    .limit(1);
+                data = res.data;
+                error = res.error;
             }
-
-            // Build query
-            let orQuery = `phone.eq.${phoneWithPlus},phone.eq.${rawPhone}`;
-            if (localPhone) orQuery += `,phone.eq.${localPhone}`;
-
-            console.log(`[CRM] Querying Supabase 'catering_leads' for phone variants: ${orQuery}`);
-
-            let { data, error } = await crmSupabase
-                .from('catering_leads')
-                .select('*')
-                .or(orQuery)
-                .order('created_at', { ascending: false })
-                .limit(1);
 
             if (data && data.length > 0) {
                 const lead = data[0];
