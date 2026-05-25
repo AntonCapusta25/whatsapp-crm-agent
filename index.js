@@ -29,7 +29,7 @@ app.post('/api/auth/login', async (req, res) => {
     if (!email || !password) {
         return res.status(400).json({ error: 'Email and password required' });
     }
-    
+
     if (!supabase) {
         return res.status(500).json({ error: 'Supabase is not configured on the server' });
     }
@@ -60,7 +60,13 @@ const requireAuth = async (req, res, next) => {
     }
 
     const token = authHeader.split(' ')[1];
-    
+
+    // Allow local scripts/crons using the WEBHOOK_API_KEY to bypass auth checks
+    const webhookKey = process.env.WEBHOOK_API_KEY;
+    if (webhookKey && token === webhookKey) {
+        return next();
+    }
+
     if (!supabase) {
         return res.status(500).json({ error: 'Supabase not configured' });
     }
@@ -128,15 +134,15 @@ async function saveSessionToSupabase(tenantId) {
         console.log(`[Supabase-Session] No local session folder found to save for tenant ${tenantId}.`);
         return;
     }
-    
+
     try {
         console.log(`[Supabase-Session] Zipping session files for tenant ${tenantId}...`);
-        
+
         const tempDir = path.join(__dirname, `temp-session-${tenantId}`);
         if (fs.existsSync(tempDir)) {
             fs.rmSync(tempDir, { recursive: true, force: true });
         }
-        
+
         const copyDirRecursiveSync = (src, dest) => {
             if (!fs.existsSync(dest)) {
                 fs.mkdirSync(dest, { recursive: true });
@@ -145,7 +151,7 @@ async function saveSessionToSupabase(tenantId) {
             for (let entry of entries) {
                 const srcPath = path.join(src, entry.name);
                 const destPath = path.join(dest, entry.name);
-                
+
                 // Skip lock files, sockets, caches, and symlinks that cause ENOENT or bloat
                 if (
                     entry.name === 'SingletonLock' ||
@@ -160,7 +166,7 @@ async function saveSessionToSupabase(tenantId) {
                 ) {
                     continue;
                 }
-                
+
                 if (entry.isDirectory()) {
                     copyDirRecursiveSync(srcPath, destPath);
                 } else if (entry.isFile()) {
@@ -172,17 +178,17 @@ async function saveSessionToSupabase(tenantId) {
                 }
             }
         };
-        
+
         copyDirRecursiveSync(sessionDir, tempDir);
-        
+
         const zip = new AdmZip();
         zip.addLocalFolder(tempDir);
         const buffer = zip.toBuffer();
         const base64Data = buffer.toString('base64');
-        
+
         // Clean up temp directory
         fs.rmSync(tempDir, { recursive: true, force: true });
-        
+
         // --- LOCAL BACKUP ADDITION ---
         const backupsDir = path.join(__dirname, 'backups');
         if (!fs.existsSync(backupsDir)) fs.mkdirSync(backupsDir, { recursive: true });
@@ -190,16 +196,16 @@ async function saveSessionToSupabase(tenantId) {
         fs.writeFileSync(backupPath, buffer);
         console.log(`[Supabase-Session] Session ZIP successfully saved locally at ${backupPath}`);
         // -----------------------------
-        
+
         console.log(`[Supabase-Session] Uploading session zip (${(buffer.length / 1024 / 1024).toFixed(2)} MB) to database...`);
         const { error } = await supabase
             .from('whatsapp_sessions')
-            .upsert({ 
-                tenant_id: tenantId, 
-                session_zip: base64Data, 
-                updated_at: new Date().toISOString() 
+            .upsert({
+                tenant_id: tenantId,
+                session_zip: base64Data,
+                updated_at: new Date().toISOString()
             }, { onConflict: 'tenant_id' });
-            
+
         if (error) {
             if (error.message && error.message.includes('does not exist')) {
                 console.warn(`[Supabase-Session] ⚠️ Table 'whatsapp_sessions' does not exist in Supabase yet. Please run the SQL migration script to enable cloud session backup.`);
@@ -217,7 +223,7 @@ async function saveSessionToSupabase(tenantId) {
 async function restoreSessionFromSupabase(tenantId) {
     if (!supabase) return false;
     const sessionDir = path.join(__dirname, `.wwebjs_auth/session-tenant-${tenantId}`);
-    
+
     // Only skip restore if the folder has actual WhatsApp auth data inside (Default/Cookies or similar)
     if (fs.existsSync(sessionDir)) {
         const defaultDir = path.join(sessionDir, 'Default');
@@ -231,7 +237,7 @@ async function restoreSessionFromSupabase(tenantId) {
             fs.rmSync(sessionDir, { recursive: true, force: true });
         }
     }
-    
+
     try {
         console.log(`[Supabase-Session] Checking Supabase for saved session for tenant ${tenantId}...`);
         const { data, error } = await supabase
@@ -239,7 +245,7 @@ async function restoreSessionFromSupabase(tenantId) {
             .select('session_zip')
             .eq('tenant_id', tenantId)
             .single();
-            
+
         if (error) {
             if (error.code === 'PGRST116') {
                 console.log(`[Supabase-Session] No saved session found in Supabase for tenant ${tenantId}.`);
@@ -250,12 +256,12 @@ async function restoreSessionFromSupabase(tenantId) {
             }
             return false;
         }
-        
+
         if (data && data.session_zip) {
             console.log(`[Supabase-Session] Restoring session files from database zip...`);
             const buffer = Buffer.from(data.session_zip, 'base64');
             const zip = new AdmZip(buffer);
-            
+
             fs.mkdirSync(sessionDir, { recursive: true });
             zip.extractAllTo(sessionDir, true);
             console.log(`[Supabase-Session] Session successfully restored locally for tenant: ${tenantId}`);
@@ -271,6 +277,8 @@ async function restoreSessionFromSupabase(tenantId) {
 const DEFAULT_CONFIG = {
     profileName: "",
     cateringWelcomeEnabled: false,
+    noAnswerFollowupEnabled: false,
+    cateringNoAnswerFollowupEnabled: false,
     welcomeMessage: {
         enabled: false,
         template: "Hello! Thank you for reaching out. How can I help you today? 🤖"
@@ -319,7 +327,7 @@ async function getBrainConfig(tenantId) {
                 .select('settings')
                 .eq('tenant_id', tenantId)
                 .single();
-                
+
             if (error) {
                 // PGRST116 indicates row does not exist
                 if (error.code === 'PGRST116') {
@@ -335,6 +343,8 @@ async function getBrainConfig(tenantId) {
                 return {
                     profileName: loaded.profileName || "",
                     cateringWelcomeEnabled: loaded.cateringWelcomeEnabled || false,
+                    noAnswerFollowupEnabled: loaded.noAnswerFollowupEnabled || false,
+                    cateringNoAnswerFollowupEnabled: loaded.cateringNoAnswerFollowupEnabled || false,
                     welcomeMessage: { ...DEFAULT_CONFIG.welcomeMessage, ...loaded.welcomeMessage },
                     autoReply: { ...DEFAULT_CONFIG.autoReply, ...loaded.autoReply },
                     aiAgent: { ...DEFAULT_CONFIG.aiAgent, ...loaded.aiAgent },
@@ -359,6 +369,8 @@ async function getBrainConfig(tenantId) {
             return {
                 profileName: loaded.profileName || "",
                 cateringWelcomeEnabled: loaded.cateringWelcomeEnabled || false,
+                noAnswerFollowupEnabled: loaded.noAnswerFollowupEnabled || false,
+                cateringNoAnswerFollowupEnabled: loaded.cateringNoAnswerFollowupEnabled || false,
                 welcomeMessage: { ...DEFAULT_CONFIG.welcomeMessage, ...loaded.welcomeMessage },
                 autoReply: { ...DEFAULT_CONFIG.autoReply, ...loaded.autoReply },
                 aiAgent: { ...DEFAULT_CONFIG.aiAgent, ...loaded.aiAgent },
@@ -440,7 +452,7 @@ const crmContextCache = new Map(); // Cache to prevent hitting CRM DB every time
 
 async function getChefContext(jid, client = null) {
     if (!crmSupabase) return null;
-    
+
     let targetJid = jid;
     if (jid.endsWith('@lid') && client) {
         try {
@@ -460,25 +472,25 @@ async function getChefContext(jid, client = null) {
     if (crmContextCache.has(targetJid)) {
         return crmContextCache.get(targetJid);
     }
-    
+
     try {
         const match = targetJid.match(/^(\d+)@c\.us$/);
         if (match) {
             const rawPhone = match[1];
             const phoneWithPlus = '+' + rawPhone;
-            
+
             // Generate local format if Dutch mobile (316 -> 06)
             let localPhone = '';
             if (rawPhone.startsWith('316')) {
                 localPhone = '06' + rawPhone.substring(3);
             }
-            
+
             // Build query
             let orQuery = `contact_phone.eq.${phoneWithPlus},contact_phone.eq.${rawPhone}`;
             if (localPhone) orQuery += `,contact_phone.eq.${localPhone}`;
-            
+
             console.log(`[CRM] Querying Supabase 'chef_profiles' for phone variants: ${orQuery}`);
-            
+
             // Use limit(1) instead of .single() because users often have multiple test accounts 
             // with the same phone number, which causes .single() to crash with HTTP 406!
             let { data, error } = await crmSupabase
@@ -487,7 +499,7 @@ async function getChefContext(jid, client = null) {
                 .or(orQuery)
                 .order('created_at', { ascending: false })
                 .limit(1);
-                
+
             if (data && data.length > 0) {
                 const profile = data[0];
                 console.log(`[CRM] Profile matched for phone ${rawPhone}: ${profile.chef_name || profile.id}`);
@@ -508,7 +520,7 @@ async function getChefContext(jid, client = null) {
 }
 function constructAIPrompt(msgs, currentMsgBody, config, chefContext = null) {
     const systemPrompt = config.aiAgent.systemPrompt;
-    
+
     // Load local knowledge base context if available
     let knowledgeContext = '';
     try {
@@ -525,12 +537,12 @@ function constructAIPrompt(msgs, currentMsgBody, config, chefContext = null) {
         const sender = m.fromMe ? 'Agent (Me)' : 'Client';
         history += `[${sender}]: ${m.body}\n`;
     }
-    
+
     let crmDataString = '';
     if (chefContext) {
         crmDataString = `\n--- CRM DATA FOR THIS CHEF ---\nThe following is live data from the database for the user you are talking to. Use it to provide hyper-personalized answers (e.g. knowing their plan, name, what steps they are missing, etc):\n${JSON.stringify(chefContext, null, 2)}\n------------------------------\n`;
     }
-    
+
     let rulesString = '';
     if (config.autoReply && config.autoReply.enabled && config.autoReply.rules && config.autoReply.rules.length > 0) {
         rulesString = `\n--- MANDATORY QUICK ANSWERS ---\nIf the user's intent clearly matches any of the topics below, you MUST reply with the exact pre-configured response provided, adjusting slightly only if necessary to sound natural.\n`;
@@ -539,7 +551,7 @@ function constructAIPrompt(msgs, currentMsgBody, config, chefContext = null) {
         }
         rulesString += `------------------------------\n`;
     }
-    
+
     return `${systemPrompt}
 
 ${knowledgeContext ? `Use the following official Homemade platform rules and reference knowledge to answer the user's questions accurately:\n${knowledgeContext}\n` : ''}${crmDataString}${rulesString}
@@ -565,7 +577,7 @@ async function callAIProvider(prompt, config) {
     if (!apiKey || apiKey === 'your_gemini_api_key_here' || apiKey === 'your_openai_api_key_here') {
         throw new Error('LLM API key is not configured. Configure it in .env');
     }
-    
+
     if (provider === 'gemini') {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
         const response = await fetch(url, {
@@ -653,10 +665,10 @@ If it is a minor greeting, status update, spam, or simple gratitude/acknowledgme
             console.error('[Agent] Error evaluating importance with AI, using rules fallback:', e.message);
         }
     }
-    
+
     const text = msgBody.toLowerCase();
     const triggers = ['price', 'pricing', 'cost', 'meeting', 'call', 'book', 'calendly', 'help', 'urgent', 'error', 'wrong', 'fail', 'issue', 'complaint', 'why', 'how', 'when', 'collab', 'partner', 'important', 'crazy', 'attention', 'alert', 'need', 'reply', 'human'];
-    
+
     if (config.autoReply && config.autoReply.rules) {
         config.autoReply.rules.forEach(rule => {
             if (rule.trigger) {
@@ -669,22 +681,22 @@ If it is a minor greeting, status update, spam, or simple gratitude/acknowledgme
     }
 
     const isShortAck = text.length < 10 && (
-        /\bok\b/i.test(text) || 
-        /\bthanks\b/i.test(text) || 
-        /\bbye\b/i.test(text) || 
-        /\bcool\b/i.test(text) || 
+        /\bok\b/i.test(text) ||
+        /\bthanks\b/i.test(text) ||
+        /\bbye\b/i.test(text) ||
+        /\bcool\b/i.test(text) ||
         /\bgood\b/i.test(text)
     );
-    
+
     const matchedTrigger = triggers.find(t => {
         const escaped = escapeRegExp(t);
         const regex = new RegExp('\\b' + escaped + '\\b', 'i');
         return regex.test(text);
     });
-    
+
     const isLong = text.length > 40;
     const isImportant = !isShortAck && (!!matchedTrigger || isLong);
-    
+
     console.log(`[Agent] Evaluating importance of: "${msgBody}". Match: ${matchedTrigger || 'None'}, Long: ${isLong}, Result: ${isImportant ? 'IMPORTANT' : 'NOT_IMPORTANT'}`);
     return isImportant;
 }
@@ -729,7 +741,7 @@ class SessionManager {
         }
 
         console.log(`[Sessions] 🚀 Initializing dynamic session for tenant: ${tenantId}`);
-        
+
         // Restore session files from Supabase if not present locally
         try {
             await restoreSessionFromSupabase(tenantId);
@@ -746,7 +758,7 @@ class SessionManager {
         // If the target process is dead, existsSync returns false, and the broken symlink is never deleted!
         const sessionPath = path.join(__dirname, '.wwebjs_auth', `session-tenant-${tenantId}`);
         const defaultProfilePath = path.join(sessionPath, 'Default');
-        
+
         [sessionPath, defaultProfilePath].forEach(dir => {
             if (fs.existsSync(dir)) {
                 const lockFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
@@ -754,7 +766,7 @@ class SessionManager {
                     const filePath = path.join(dir, file);
                     try {
                         fs.unlinkSync(filePath); // Just attempt to delete, catch handles if it doesn't exist
-                    } catch (e) {}
+                    } catch (e) { }
                 });
             }
         });
@@ -813,7 +825,7 @@ class SessionManager {
             this.syncMsgs.set(tenantId, message);
             broadcastSSE({ type: 'sync', tenantId, percent: pct, message });
             broadcastSSE({ type: 'status', tenantId, status: 'SYNCING' });
-            
+
             // Fix for stuck SYNCING state
             if (pct >= 99) {
                 setTimeout(() => {
@@ -831,7 +843,7 @@ class SessionManager {
             this.statuses.set(tenantId, 'READY');
             this.qrTexts.delete(tenantId);
             broadcastSSE({ type: 'status', tenantId, status: 'READY' });
-            
+
             // Backup session to Supabase after 5s delay to let local files settle
             setTimeout(() => {
                 saveSessionToSupabase(tenantId).catch(err => {
@@ -948,7 +960,7 @@ class SessionManager {
                 try {
                     const chat = await msg.getChat();
                     const msgs = await chat.fetchMessages({ limit: 8 });
-                    
+
                     const chefContext = await getChefContext(jid, client);
                     const prompt = constructAIPrompt(msgs, msg.body, config, chefContext);
                     const reply = await callAIProvider(prompt, config);
@@ -1024,15 +1036,15 @@ class SessionManager {
             const minDelay = parseInt(process.env.MIN_DELAY_MS, 10) || 5000;
             const maxDelay = parseInt(process.env.MAX_DELAY_MS, 10) || 15000;
             const delay = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
-            
+
             console.log(`[Queue] Tenant ${tenantId}: Simulating typing. Next send in ${delay}ms...`);
             await new Promise(resolve => setTimeout(resolve, delay));
-            
+
             try {
                 // Simulate typing status before sending
                 const chat = await client.getChatById(item.jid);
                 await chat.sendStateTyping();
-                
+
                 const typingDelay = Math.min(8000, Math.max(2000, item.messageText.length * 50));
                 await new Promise(resolve => setTimeout(resolve, typingDelay));
 
@@ -1073,7 +1085,7 @@ class SessionManager {
             this.isProcessingQueue.delete(tenantId);
             this.syncPercents.delete(tenantId);
             this.syncMsgs.delete(tenantId);
-            
+
             // Let the OS release the folder locks
             await new Promise(resolve => setTimeout(resolve, 1500));
             const authPath = path.join(__dirname, `.wwebjs_auth/session-tenant-${tenantId}`);
@@ -1084,12 +1096,12 @@ class SessionManager {
                         console.log(`[Sessions] 🗑️ Cleaned up authentication session folders for: ${tenantId}`);
                         break;
                     } catch (rmErr) {
-                        console.warn(`[Sessions] Retrying folder deletion for tenant ${tenantId} (${i+1}/5):`, rmErr.message);
+                        console.warn(`[Sessions] Retrying folder deletion for tenant ${tenantId} (${i + 1}/5):`, rmErr.message);
                         await new Promise(resolve => setTimeout(resolve, 1000));
                     }
                 }
             }
-            
+
             // Delete from Supabase if configured
             if (supabase) {
                 try {
@@ -1111,13 +1123,13 @@ const sessionManager = new SessionManager();
 // ------------------------------------------------------------------
 // Catering Leads Welcome Message Daemon (booking_submissions table)
 // ------------------------------------------------------------------
-if (crmSupabase) {
+if (supabase) {
     const greetedBookings = new Set();
-    
+
     // 1. Pre-populate existing bookings on startup to avoid double-greetings
     (async () => {
         try {
-            const { data, error } = await crmSupabase
+            const { data, error } = await supabase
                 .from('booking_submissions')
                 .select('id')
                 .order('created_at', { ascending: false })
@@ -1135,21 +1147,21 @@ if (crmSupabase) {
     const sendCateringGreeting = async (row) => {
         if (!row || !row.id || greetedBookings.has(row.id)) return;
         greetedBookings.add(row.id);
-        
+
         const rawPhone = row.phone;
         const name = row.name || '';
-        
+
         if (!rawPhone) {
             console.log(`[Catering-Welcome] Booking ${row.id} has no phone. Skipping.`);
             return;
         }
-        
+
         const sanitizedPhone = sanitizePhone(rawPhone);
         if (!sanitizedPhone) {
             console.log(`[Catering-Welcome] Booking ${row.id} has invalid phone number "${rawPhone}". Skipping.`);
             return;
         }
-        
+
         // Find which active sessions have cateringWelcomeEnabled enabled in settings
         const activeSenders = [];
         const activeSessions = Array.from(sessionManager.sessions.keys());
@@ -1172,7 +1184,7 @@ if (crmSupabase) {
         const jid = `${sanitizedPhone}@c.us`;
         const firstName = name.trim().split(' ')[0] || '';
         const welcomeText = `hey, its tia from homemade\n\nthank you so much for signing up for a private chef${firstName ? ', ' + firstName : ''}! can you provide your city and confirm the dates so we can proceed and communicate it with a chef?`;
-        
+
         for (const senderTenantId of activeSenders) {
             console.log(`[Catering-Welcome] 📩 Queueing welcome message for catering lead ${sanitizedPhone} (${name}) on tenant: ${senderTenantId}`);
             sessionManager.queueMessage(senderTenantId, jid, welcomeText);
@@ -1181,7 +1193,7 @@ if (crmSupabase) {
 
     // 2. Realtime listener triggers welcome message on insert
     try {
-        crmSupabase
+        supabase
             .channel('public:booking_submissions')
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'booking_submissions' }, async (payload) => {
                 if (payload && payload.new) {
@@ -1204,7 +1216,7 @@ if (crmSupabase) {
                 .from('booking_submissions')
                 .select('*')
                 .gte('created_at', fiveMinutesAgo);
-                
+
             if (data && !error) {
                 for (const row of data) {
                     if (!greetedBookings.has(row.id)) {
@@ -1217,15 +1229,17 @@ if (crmSupabase) {
             console.error('[Catering-Welcome] Polling fallback exception:', pollErr.message);
         }
     }, 20000);
+}
 
-    // ------------------------------------------------------------------
-    // "No Answer" Followup Daemon (chef_admin_data & old_leads)
-    // ------------------------------------------------------------------
+// ------------------------------------------------------------------
+// "No Answer" Followup Daemon (chef_admin_data & old_leads)
+// ------------------------------------------------------------------
+if (crmSupabase) {
     const notifiedNoAnswers = new Set();
 
     const dispatchNoAnswerMessage = async (phoneStr, nameStr, recordId) => {
         if (!phoneStr || notifiedNoAnswers.has(recordId)) return;
-        
+
         // Find which active sessions have noAnswerFollowupEnabled enabled in settings
         const activeSenders = [];
         const activeSessions = Array.from(sessionManager.sessions.keys());
@@ -1269,13 +1283,13 @@ if (crmSupabase) {
                 if (payload.new && payload.new.admin_status === 'no_answer') {
                     const chefId = payload.new.chef_profile_id;
                     if (!chefId) return;
-                    
+
                     const { data, error } = await crmSupabase
                         .from('chef_profiles')
                         .select('contact_phone, chef_name')
                         .eq('id', chefId)
                         .single();
-                        
+
                     if (data && !error && data.contact_phone) {
                         await dispatchNoAnswerMessage(data.contact_phone, data.chef_name, payload.new.id);
                     }
@@ -1292,12 +1306,115 @@ if (crmSupabase) {
                 }
             })
             .subscribe();
-            
+
         console.log(`[NoAnswer-Daemon] Subscribed to Realtime UPDATE events for 'no_answer' triggers.`);
     } catch (err) {
         console.error('[NoAnswer-Daemon] Subscription error:', err.message);
     }
 }
+
+// ------------------------------------------------------------------
+// "Catering No Answer" Followup Daemon (catering_leads table in crmSupabase)
+// ------------------------------------------------------------------
+if (crmSupabase) {
+    const notifiedCateringNoAnswers = new Set();
+
+    // 1. Pre-populate already existing 'no_answer' leads at startup so we don't spam historical records
+    (async () => {
+        try {
+            const { data, error } = await crmSupabase
+                .from('catering_leads')
+                .select('id')
+                .eq('status', 'no_answer')
+                .limit(200);
+
+            if (data && !error) {
+                data.forEach(row => notifiedCateringNoAnswers.add(row.id));
+                console.log(`[Catering-NoAnswer-Daemon] Pre-populated ${notifiedCateringNoAnswers.size} existing no_answer catering leads to ignore.`);
+            }
+        } catch (err) {
+            console.error('[Catering-NoAnswer-Daemon] Startup pre-populate error:', err.message);
+        }
+    })();
+
+    const dispatchCateringNoAnswerMessage = async (phoneStr, nameStr, recordId) => {
+        if (!phoneStr || notifiedCateringNoAnswers.has(recordId)) return;
+
+        // Find which active sessions have cateringNoAnswerFollowupEnabled enabled in settings
+        const activeSenders = [];
+        const activeSessions = Array.from(sessionManager.sessions.keys());
+        for (const tId of activeSessions) {
+            try {
+                if (sessionManager.getStatus(tId) !== 'READY') continue;
+                const config = await getBrainConfig(tId);
+                if (config.cateringNoAnswerFollowupEnabled) {
+                    activeSenders.push(tId);
+                }
+            } catch (err) {
+                console.error(`[Catering-NoAnswer-Daemon] Error checking config for ${tId}:`, err.message);
+            }
+        }
+
+        if (activeSenders.length === 0) {
+            console.log(`[Catering-NoAnswer-Daemon] Dropping Catering No Answer followup for ${phoneStr} - feature is disabled on all active tenants.`);
+            return;
+        }
+
+        notifiedCateringNoAnswers.add(recordId);
+        const sanitizedPhone = sanitizePhone(phoneStr);
+        if (!sanitizedPhone) return;
+
+        const jid = `${sanitizedPhone}@c.us`;
+        const firstName = nameStr ? nameStr.trim().split(' ')[0] : '';
+        const greeting = firstName ? `Hey ${firstName}, ` : `Hey! `;
+        const messageText = `${greeting}we tried calling you regarding your catering request but it looks like you were not available. Let us know when is a good time to reach you, or if you prefer, we can just chat right here!`;
+
+        for (const senderTenantId of activeSenders) {
+            console.log(`[Catering-NoAnswer-Daemon] 📩 Queueing Catering No Answer followup for ${sanitizedPhone} on tenant: ${senderTenantId}`);
+            sessionManager.queueMessage(senderTenantId, jid, messageText);
+        }
+    };
+
+    try {
+        // 2. Subscribe to Realtime UPDATE events
+        crmSupabase
+            .channel('public:catering_leads')
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'catering_leads' }, async (payload) => {
+                if (payload.new && payload.new.status === 'no_answer') {
+                    console.log(`[Catering-NoAnswer-Daemon] Realtime update caught status 'no_answer' for: ${payload.new.id}`);
+                    await dispatchCateringNoAnswerMessage(payload.new.phone, payload.new.customer_name, payload.new.id);
+                }
+            })
+            .subscribe();
+
+        // 3. Polling fallback engine (runs every 20 seconds checking updates in the last 5 minutes)
+        setInterval(async () => {
+            try {
+                const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+                const { data, error } = await crmSupabase
+                    .from('catering_leads')
+                    .select('*')
+                    .eq('status', 'no_answer')
+                    .gte('updated_at', fiveMinutesAgo);
+
+                if (data && !error) {
+                    for (const row of data) {
+                        if (!notifiedCateringNoAnswers.has(row.id)) {
+                            console.log(`[Catering-NoAnswer-Daemon] Polling fallback caught no-response catering lead: ${row.id}`);
+                            await dispatchCateringNoAnswerMessage(row.phone, row.customer_name, row.id);
+                        }
+                    }
+                }
+            } catch (pollErr) {
+                console.error('[Catering-NoAnswer-Daemon] Polling fallback exception:', pollErr.message);
+            }
+        }, 20000);
+        console.log(`[Catering-NoAnswer-Daemon] Subscribed to Realtime UPDATE events for 'no_answer' triggers.`);
+    } catch (err) {
+        console.error('[Catering-NoAnswer-Daemon] Subscription error:', err.message);
+    }
+}
+
 
 // ------------------------------------------------------------------
 // Express Server & API Endpoints
@@ -1308,10 +1425,10 @@ const WEBHOOK_API_KEY = process.env.WEBHOOK_API_KEY;
 // Auto-start all known tenants on server boot
 async function autoStartAllTenants() {
     const tenants = new Set();
-    
+
     // Always boot 'default'
     tenants.add('default');
-    
+
     // 1. Add tenants from local configuration files
     const configDir = path.join(__dirname, 'configs');
     if (fs.existsSync(configDir)) {
@@ -1327,7 +1444,7 @@ async function autoStartAllTenants() {
             console.error('[Startup] Error scanning configs:', e.message);
         }
     }
-    
+
     // 2. Add tenants from local session folders
     const authDir = path.join(__dirname, '.wwebjs_auth');
     if (fs.existsSync(authDir)) {
@@ -1343,7 +1460,7 @@ async function autoStartAllTenants() {
             console.error('[Startup] Error scanning session folders:', e.message);
         }
     }
-    
+
     // 3. Add tenants from Supabase settings
     if (supabase) {
         try {
@@ -1361,7 +1478,7 @@ async function autoStartAllTenants() {
             console.error('[Startup] Error scanning tenants from Supabase settings:', dbErr.message);
         }
     }
-    
+
     // 4. Add tenants from Supabase session backups table
     if (supabase) {
         try {
@@ -1379,9 +1496,9 @@ async function autoStartAllTenants() {
             console.error('[Startup] Error scanning tenants from Supabase sessions:', dbErr.message);
         }
     }
-    
+
     console.log(`[Startup] 🚀 Auto-booting all known tenants: [${Array.from(tenants).join(', ')}]`);
-    
+
     // Initialize sessions sequentially to prevent overloading CPU/Puppeteer on cold boots
     for (const tenantId of tenants) {
         try {
@@ -1569,19 +1686,33 @@ app.get('/api/crm/profiles', async (req, res) => {
     }
 });
 
+// Fetch all Catering Leads for Dashboard
+app.get('/api/crm/catering-leads', async (req, res) => {
+    try {
+        const { data, error } = await crmSupabase
+            .from('catering_leads')
+            .select('*')
+            .order('created_at', { ascending: false });
+        if (error) throw error;
+        return res.json({ success: true, leads: data });
+    } catch (e) {
+        return res.status(500).json({ error: e.message });
+    }
+});
+
 // 14. Dispatch Batch Campaign
 app.post('/api/:tenantId/campaign/send', async (req, res) => {
     const { tenantId } = req.params;
     const { phones, message } = req.body;
-    
+
     if (!phones || !Array.isArray(phones) || !message) {
         return res.status(400).json({ error: 'Missing phones array or message.' });
     }
-    
+
     if (sessionManager.getStatus(tenantId) !== 'READY') {
         return res.status(503).json({ error: `Tenant ${tenantId} is not ready.` });
     }
-    
+
     phones.forEach(phone => {
         if (!phone) return;
         // Strip formatting (keep only digits)
@@ -1590,17 +1721,17 @@ app.post('/api/:tenantId/campaign/send', async (req, res) => {
         const jid = `${rawPhone}@c.us`;
         sessionManager.queueMessage(tenantId, jid, message);
     });
-    
+
     return res.json({ success: true, queued: phones.length });
 });
 
 // 12. Fetch list of all known tenants
 app.get('/api/tenants', async (req, res) => {
     const tenants = new Set();
-    
+
     // 1. Add active sessions
     Array.from(sessionManager.sessions.keys()).forEach(t => tenants.add(t));
-    
+
     // 2. Add local configuration files
     const configDir = path.join(__dirname, 'configs');
     if (fs.existsSync(configDir)) {
@@ -1616,7 +1747,7 @@ app.get('/api/tenants', async (req, res) => {
             console.error('[API] Error reading local config directory:', e.message);
         }
     }
-    
+
     // 3. Add tenants from Supabase if active
     if (supabase) {
         try {
@@ -1634,10 +1765,10 @@ app.get('/api/tenants', async (req, res) => {
             console.error('[API] Error querying tenants from Supabase:', dbErr.message);
         }
     }
-    
+
     // Always guarantee 'default' is present
     tenants.add('default');
-    
+
     // Resolve profileName for each tenant
     const tenantsData = [];
     for (const t of tenants) {
@@ -1651,7 +1782,7 @@ app.get('/api/tenants', async (req, res) => {
             tenantsData.push({ id: t, name: t });
         }
     }
-    
+
     return res.json({ success: true, tenants: tenantsData });
 });
 
@@ -1762,11 +1893,11 @@ app.get('/api/:tenantId/crm-context/:jid', async (req, res) => {
     try {
         const { tenantId, jid } = req.params;
         const client = await sessionManager.getClient(tenantId);
-        
+
         console.log(`[API] CRM Context Lookup Initiated for JID: ${jid} (Tenant: ${tenantId})`);
         const context = await getChefContext(jid, client);
         console.log(`[API] CRM Context Result for JID: ${jid} -> ${context ? 'FOUND' : 'NOT FOUND'}`);
-        
+
         return res.json({ success: true, context });
     } catch (err) {
         console.error(`[API] CRM context error:`, err.message);
@@ -1831,11 +1962,11 @@ app.post('/api/:tenantId/suggest-response', async (req, res) => {
     try {
         const chat = await client.getChatById(jid);
         const msgs = await chat.fetchMessages({ limit: 10 });
-        
+
         if (msgs.length > 0 && msgs[msgs.length - 1].fromMe) {
-            return res.json({ 
-                success: true, 
-                suggestedMessage: 'You already replied to this message.', 
+            return res.json({
+                success: true,
+                suggestedMessage: 'You already replied to this message.',
                 important: false,
                 needed: false
             });
@@ -1863,7 +1994,7 @@ app.post('/api/:tenantId/suggest-response', async (req, res) => {
         const text = lastMsgBody.toLowerCase().trim();
         let suggestedMessage = '';
         let important = true;
-        
+
         if (text.includes('hello') || text.includes('hi') || text.includes('hey')) {
             suggestedMessage = 'Hi! How can I help you today?';
         } else if (text.includes('price') || text.includes('pricing') || text.includes('cost')) {
@@ -1947,7 +2078,7 @@ cron.schedule('0 18 * * *', async () => {
     console.log('[Cron] Starting daily unanswered chats report engine...');
     let reportText = 'Daily Unanswered Chats Report\n\n';
     let needsFollowUpCount = 0;
-    
+
     // We need to bypass the strict systemPrompt for this classification task
     // so we pass a dummy config to callAIProvider that turns it into a classifier.
     const classifierConfig = {
@@ -1960,7 +2091,7 @@ cron.schedule('0 18 * * *', async () => {
 
     for (const [tenantId, client] of sessionManager.sessions.entries()) {
         if (sessionManager.getStatus(tenantId) !== 'READY') continue;
-        
+
         try {
             const chats = await client.getChats();
             const apiKey = process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY;
@@ -1971,13 +2102,13 @@ cron.schedule('0 18 * * *', async () => {
                 // Only consider chats with unread messages or where the last message is from the client
                 const messages = await chat.fetchMessages({ limit: 5 });
                 if (messages.length === 0) continue;
-                
+
                 const lastMsg = messages[messages.length - 1];
                 if (lastMsg.fromMe) continue; // We replied recently.
 
                 if (apiKey) {
                     const prompt = `Analyze this chat history. The last message is from the client. Does this message reasonably require a response or follow-up from the agent? \nIf it's just a simple 'ok', 'thanks', 'cool', '👍', or a conversational ender, return exactly "NO". \nIf it contains a question, a complaint, or requires an operational response, return exactly "YES".\n\nChat history:\n` + messages.map(m => `[${m.fromMe ? 'Agent' : 'Client'}]: ${m.body}`).join('\n');
-                    
+
                     try {
                         const aiDecision = await callAIProvider(prompt, classifierConfig);
                         if (aiDecision.trim().toUpperCase() === 'YES') {
@@ -2002,7 +2133,7 @@ cron.schedule('0 18 * * *', async () => {
         const sendgridKey = process.env.SENDGRID_API_KEY;
         const fromEmail = process.env.SENDGRID_FROM_EMAIL;
         const toEmails = ['bangalexf@gmail.com', 'mahmoudelwakil22@gmail.com'];
-        
+
         if (sendgridKey && fromEmail) {
             for (const email of toEmails) {
                 await sendSendGridEmail({
