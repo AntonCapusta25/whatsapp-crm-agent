@@ -100,6 +100,35 @@ async function runBackfill() {
                 continue;
             }
 
+            // Check if they already received the followup message by fetching chat history
+            let hasAlreadySent = false;
+            const historyUrl = `http://${host}:${port}/api/${tenantId}/history/jid/${cleanedPhone}@c.us`;
+            try {
+                const historyResponse = await fetch(historyUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${webhookApiKey}`
+                    }
+                });
+
+                if (historyResponse.ok) {
+                    const historyResult = await historyResponse.json();
+                    if (historyResult.success && Array.isArray(historyResult.messages)) {
+                        hasAlreadySent = historyResult.messages.some(m => 
+                            m.fromMe && m.body && m.body.includes('catering request but it looks like you were not available')
+                        );
+                    }
+                }
+            } catch (historyErr) {
+                // Connection error (e.g., server offline during dry run) or chat does not exist on WhatsApp yet
+            }
+
+            if (hasAlreadySent) {
+                console.log(`⚠️ Skip [${lead.id}] - Already messaged this contact previously. Name: "${name}", Phone: "${cleanedPhone}"`);
+                skippedCount++;
+                continue;
+            }
+
             const firstName = name.trim().split(' ')[0];
             const greeting = firstName ? `Hey ${firstName}, ` : `Hey! `;
             const messageText = `${greeting}we tried calling you regarding your catering request but it looks like you were not available. Let us know when is a good time to reach you, or if you prefer, we can just chat right here!`;
