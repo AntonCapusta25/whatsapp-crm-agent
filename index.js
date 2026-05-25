@@ -907,26 +907,17 @@ class SessionManager {
                 }
             }
 
-            // 2. Evaluate Importance & send SendGrid Notification
-            if (config.emailNotification && config.emailNotification.enabled) {
+            // 2. Evaluate Importance & send WhatsApp Notification (Only for tenant 'tia' and not from admin)
+            if (tenantId === 'tia' && phone !== '3197010208809') {
                 try {
                     const isImportant = await evaluateImportance(msg.body, config);
                     if (isImportant) {
-                        const mailApiKey = process.env.SENDGRID_API_KEY || config.emailNotification.apiKey;
-                        const fromEmail = process.env.SENDGRID_FROM_EMAIL || config.emailNotification.fromEmail;
-                        const toEmail = process.env.SENDGRID_TO_EMAIL || config.emailNotification.toEmail;
-                        const subject = config.emailNotification.subject || "⚠️ Urgent WhatsApp Handoff Alert";
+                        const targetPhone = '3197010208809';
+                        const targetJid = `${targetPhone}@c.us`;
+                        const alertText = `⚠️ *Urgent WhatsApp Handoff Alert (Tia)*\n*Contact*: ${phone}\n*Message*: "${msg.body}"\n\nPlease reply accordingly on the dashboard.`;
 
-                        if (mailApiKey && fromEmail && toEmail) {
-                            const emailBody = `Hello,\n\nYour WhatsApp agent has flagged an important message from client.\n\nTenant: ${tenantId}\nContact: ${phone}\nMessage: "${msg.body}"\n\nPlease reply accordingly on the dashboard.`;
-                            sendSendGridEmail({
-                                apiKey: mailApiKey,
-                                to: toEmail,
-                                from: fromEmail,
-                                subject,
-                                text: emailBody
-                            }).catch(err => console.error(`[Alert] SendGrid dispatch error for tenant ${tenantId}:`, err.message));
-                        }
+                        console.log(`[Alert] Live important message flagged for Tia. Queueing WhatsApp alert to ${targetJid}`);
+                        sessionManager.queueMessage('tia', targetJid, alertText);
                     }
                 } catch (err) {
                     console.error(`[Alert] Importance evaluation failed for tenant ${tenantId}:`, err.message);
@@ -2091,12 +2082,19 @@ app.get(/^(?!\/(api|status|events|webhook)).*/, (req, res) => {
 // ------------------------------------------------------------------
 cron.schedule('0 18 * * *', async () => {
     // Run daily at 18:00 (6 PM)
-    console.log('[Cron] Starting daily unanswered chats report engine...');
-    let reportText = 'Daily Unanswered Chats Report\n\n';
+    console.log('[Cron] Starting daily unanswered chats report engine for tenant "tia"...');
+    let reportText = '📋 *Daily Unanswered Chats Report (Tia)*\n\n';
     let needsFollowUpCount = 0;
 
-    // We need to bypass the strict systemPrompt for this classification task
-    // so we pass a dummy config to callAIProvider that turns it into a classifier.
+    const tenantId = 'tia';
+    const client = sessionManager.sessions.get(tenantId);
+    const status = sessionManager.getStatus(tenantId);
+
+    if (!client || status !== 'READY') {
+        console.error(`[Cron] Cannot generate daily report: tenant ${tenantId} is not READY (Status: ${status}).`);
+        return;
+    }
+
     const classifierConfig = {
         aiAgent: {
             provider: 'gemini',
@@ -2105,40 +2103,39 @@ cron.schedule('0 18 * * *', async () => {
         }
     };
 
-    for (const [tenantId, client] of sessionManager.sessions.entries()) {
-        if (sessionManager.getStatus(tenantId) !== 'READY') continue;
+    try {
+        const chats = await client.getChats();
+        const apiKey = process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY;
 
-        try {
-            const chats = await client.getChats();
-            const apiKey = process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY;
+        for (const chat of chats) {
+            if (chat.isGroup) continue;
 
-            for (const chat of chats) {
-                if (chat.isGroup) continue;
+            // Skip reporting on the admin notification number itself
+            if (chat.id.user === '3197010208809') continue;
 
-                // Only consider chats with unread messages or where the last message is from the client
-                const messages = await chat.fetchMessages({ limit: 5 });
-                if (messages.length === 0) continue;
+            // Only consider chats with unread messages or where the last message is from the client
+            const messages = await chat.fetchMessages({ limit: 5 });
+            if (messages.length === 0) continue;
 
-                const lastMsg = messages[messages.length - 1];
-                if (lastMsg.fromMe) continue; // We replied recently.
+            const lastMsg = messages[messages.length - 1];
+            if (lastMsg.fromMe) continue; // We replied recently.
 
-                if (apiKey) {
-                    const prompt = `Analyze this chat history. The last message is from the client. Does this message reasonably require a response or follow-up from the agent? \nIf it's just a simple 'ok', 'thanks', 'cool', '👍', or a conversational ender, return exactly "NO". \nIf it contains a question, a complaint, or requires an operational response, return exactly "YES".\n\nChat history:\n` + messages.map(m => `[${m.fromMe ? 'Agent' : 'Client'}]: ${m.body}`).join('\n');
+            if (apiKey) {
+                const prompt = `Analyze this chat history. The last message is from the client. Does this message reasonably require a response or follow-up from the agent? \nIf it's just a simple 'ok', 'thanks', 'cool', '👍', or a conversational ender, return exactly "NO". \nIf it contains a question, a complaint, or requires an operational response, return exactly "YES".\n\nChat history:\n` + messages.map(m => `[${m.fromMe ? 'Agent' : 'Client'}]: ${m.body}`).join('\n');
 
-                    try {
-                        const aiDecision = await callAIProvider(prompt, classifierConfig);
-                        if (aiDecision.trim().toUpperCase() === 'YES') {
-                            needsFollowUpCount++;
-                            reportText += `- Tenant: ${tenantId}\n  Chat: ${chat.name}\n  Phone: ${chat.id.user}\n  Last Message: "${lastMsg.body}"\n\n`;
-                        }
-                    } catch (e) {
-                        console.error(`[Cron] AI classification failed for ${chat.id.user}:`, e.message);
+                try {
+                    const aiDecision = await callAIProvider(prompt, classifierConfig);
+                    if (aiDecision.trim().toUpperCase() === 'YES') {
+                        needsFollowUpCount++;
+                        reportText += `• *Chat*: ${chat.name}\n  *Phone*: ${chat.id.user}\n  *Last Message*: "${lastMsg.body}"\n\n`;
                     }
+                } catch (e) {
+                    console.error(`[Cron] AI classification failed for ${chat.id.user}:`, e.message);
                 }
             }
-        } catch (err) {
-            console.error(`[Cron] Error processing tenant ${tenantId}:`, err.message);
         }
+    } catch (err) {
+        console.error(`[Cron] Error processing tenant ${tenantId}:`, err.message);
     }
 
     if (needsFollowUpCount === 0) {
@@ -2146,26 +2143,12 @@ cron.schedule('0 18 * * *', async () => {
     }
 
     try {
-        const sendgridKey = process.env.SENDGRID_API_KEY;
-        const fromEmail = process.env.SENDGRID_FROM_EMAIL;
-        const toEmails = ['bangalexf@gmail.com', 'mahmoudelwakil22@gmail.com'];
-
-        if (sendgridKey && fromEmail) {
-            for (const email of toEmails) {
-                await sendSendGridEmail({
-                    to: email,
-                    from: fromEmail,
-                    subject: `Daily Unanswered Chats Report - ${needsFollowUpCount} Need Action`,
-                    text: reportText,
-                    apiKey: sendgridKey
-                });
-            }
-            console.log('[Cron] Daily report emails sent successfully.');
-        } else {
-            console.warn('[Cron] SENDGRID_API_KEY or FROM_EMAIL not set. Skipping report email.');
-        }
+        const targetPhone = '3197010208809';
+        const targetJid = `${targetPhone}@c.us`;
+        console.log(`[Cron] Queueing daily report to ${targetJid} via tenant "tia"`);
+        sessionManager.queueMessage(tenantId, targetJid, reportText);
     } catch (e) {
-        console.error('[Cron] Error sending report email:', e.message);
+        console.error('[Cron] Error queueing report WhatsApp message:', e.message);
     }
 });
 
