@@ -534,6 +534,69 @@ async function getChefContext(jid, client = null) {
     }
     return null;
 }
+
+async function getCateringLeadContext(jid, client = null) {
+    if (!crmSupabase) return null;
+
+    let targetJid = jid;
+    if (jid.endsWith('@lid') && client) {
+        try {
+            const contact = await client.getContactById(jid);
+            if (contact && contact.id && contact.id._serialized && contact.id._serialized.endsWith('@c.us')) {
+                targetJid = contact.id._serialized;
+            } else if (contact && contact.id && contact.id.user) {
+                targetJid = `${contact.id.user}@c.us`;
+            }
+        } catch (e) {
+            console.error(`[CRM] Failed to resolve LID ${jid} for catering:`, e.message);
+        }
+    }
+
+    if (crmContextCache.has(targetJid)) {
+        return crmContextCache.get(targetJid);
+    }
+
+    try {
+        const match = targetJid.match(/^(\d+)@c\.us$/);
+        if (match) {
+            const rawPhone = match[1];
+            const phoneWithPlus = '+' + rawPhone;
+
+            // Generate local format if Dutch mobile (316 -> 06)
+            let localPhone = '';
+            if (rawPhone.startsWith('316')) {
+                localPhone = '06' + rawPhone.substring(3);
+            }
+
+            // Build query
+            let orQuery = `phone.eq.${phoneWithPlus},phone.eq.${rawPhone}`;
+            if (localPhone) orQuery += `,phone.eq.${localPhone}`;
+
+            console.log(`[CRM] Querying Supabase 'catering_leads' for phone variants: ${orQuery}`);
+
+            let { data, error } = await crmSupabase
+                .from('catering_leads')
+                .select('*')
+                .or(orQuery)
+                .order('created_at', { ascending: false })
+                .limit(1);
+
+            if (data && data.length > 0) {
+                const lead = data[0];
+                const wrapped = { _isCateringLead: true, ...lead };
+                console.log(`[CRM] Catering Lead matched for phone ${rawPhone}: ${lead.customer_name || lead.id}`);
+                crmContextCache.set(targetJid, wrapped);
+                if (targetJid !== jid) crmContextCache.set(jid, wrapped);
+                return wrapped;
+            } else {
+                console.log(`[CRM] No row matched in Supabase 'catering_leads' for phone ${rawPhone}`);
+            }
+        }
+    } catch (err) {
+        console.error('[CRM] Fetch error for Catering JID ' + targetJid + ':', err.message);
+    }
+    return null;
+}
 function constructAIPrompt(msgs, currentMsgBody, config, chefContext = null) {
     const systemPrompt = config.aiAgent.systemPrompt;
 
@@ -1902,10 +1965,23 @@ app.get('/api/:tenantId/crm-context/:jid', async (req, res) => {
         const client = await sessionManager.getClient(tenantId);
 
         console.log(`[API] CRM Context Lookup Initiated for JID: ${jid} (Tenant: ${tenantId})`);
-        const context = await getChefContext(jid, client);
-        console.log(`[API] CRM Context Result for JID: ${jid} -> ${context ? 'FOUND' : 'NOT FOUND'}`);
+        
+        // 1. Try to find chef first
+        const chefContext = await getChefContext(jid, client);
+        if (chefContext) {
+            console.log(`[API] CRM Context Result for JID: ${jid} -> FOUND (Chef)`);
+            return res.json({ success: true, type: 'chef', context: chefContext });
+        }
 
-        return res.json({ success: true, context });
+        // 2. Try to find catering lead if not chef
+        const cateringContext = await getCateringLeadContext(jid, client);
+        if (cateringContext) {
+            console.log(`[API] CRM Context Result for JID: ${jid} -> FOUND (Catering)`);
+            return res.json({ success: true, type: 'catering', context: cateringContext });
+        }
+
+        console.log(`[API] CRM Context Result for JID: ${jid} -> NOT FOUND`);
+        return res.json({ success: true, type: null, context: null });
     } catch (err) {
         console.error(`[API] CRM context error:`, err.message);
         return res.status(500).json({ error: err.message });

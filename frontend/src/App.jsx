@@ -9,6 +9,15 @@ const getAvatarChar = (name) => {
   return clean.charAt(0).toUpperCase() || '';
 };
 
+const sanitizePhone = (phone) => {
+  if (!phone) return '';
+  let cleaned = String(phone).replace(/\D/g, '');
+  if (cleaned.startsWith('00')) {
+    cleaned = cleaned.substring(2);
+  }
+  return cleaned;
+};
+
 const PRESET_ANSWERS = [
   {
     label: "Cost & Plans",
@@ -226,8 +235,29 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [inputText, setInputText] = useState('');
   
+  const [activeTab, setActiveTab] = useState('chats');
+  const [cateringLeads, setCateringLeads] = useState([]);
+  const [loadingCaterings, setLoadingCaterings] = useState(false);
+  const [cateringSearchTerm, setCateringSearchTerm] = useState('');
+
+  const loadCateringLeads = async () => {
+    setLoadingCaterings(true);
+    try {
+      const res = await apiFetch('/api/crm/catering-leads');
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setCateringLeads(data.leads);
+      }
+    } catch (e) {
+      console.error('Error fetching catering leads:', e);
+    } finally {
+      setLoadingCaterings(false);
+    }
+  };
+  
   const [showSettings, setShowSettings] = useState(false);
   const [crmContext, setCrmContext] = useState(null);
+  const [crmType, setCrmType] = useState(''); // 'chef' or 'catering'
   const [loadingCrm, setLoadingCrm] = useState(false);
   const [crmError, setCrmError] = useState('');
   const [suggestion, setSuggestion] = useState('');
@@ -379,6 +409,7 @@ export default function App() {
     if (!activeChat) {
       setSuggestion('');
       setCrmContext(null);
+      setCrmType('');
       return;
     }
 
@@ -429,16 +460,20 @@ export default function App() {
         if (res.ok && data.success) {
           if (data.context) {
             setCrmContext(data.context);
+            setCrmType(data.type || 'chef');
           } else {
             setCrmContext(null);
+            setCrmType('');
             setCrmError('Contact not found in CRM database.');
           }
         } else {
           setCrmContext(null);
+          setCrmType('');
           setCrmError(data.error || 'Failed to fetch CRM profile.');
         }
       } catch (e) {
         setCrmContext(null);
+        setCrmType('');
         setCrmError('Network error fetching CRM profile.');
       } finally {
         setLoadingCrm(false);
@@ -714,64 +749,194 @@ export default function App() {
           </div>
         </div>
 
-        {/* Search */}
-        <div className="search-container">
-          <div className="search-box">
-            <span></span>
-            <input 
-              type="text" 
-              className="search-input" 
-              placeholder="Search or start new chat" 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
+        {/* Tab Bar Selection */}
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', background: 'var(--panel-bg)' }}>
+          <button 
+            onClick={() => setActiveTab('chats')} 
+            style={{ 
+              flex: 1, 
+              padding: '0.75rem', 
+              border: 'none', 
+              borderBottom: activeTab === 'chats' ? '2.5px solid var(--accent-green)' : '2.5px solid transparent', 
+              background: 'none', 
+              color: activeTab === 'chats' ? 'var(--text-main)' : 'var(--text-muted)', 
+              fontWeight: activeTab === 'chats' ? 700 : 500, 
+              fontSize: '0.85rem', 
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              outline: 'none'
+            }}
+          >
+            💬 Chats
+          </button>
+          <button 
+            onClick={() => {
+              setActiveTab('caterings');
+              loadCateringLeads();
+            }} 
+            style={{ 
+              flex: 1, 
+              padding: '0.75rem', 
+              border: 'none', 
+              borderBottom: activeTab === 'caterings' ? '2.5px solid var(--accent-green)' : '2.5px solid transparent', 
+              background: 'none', 
+              color: activeTab === 'caterings' ? 'var(--text-main)' : 'var(--text-muted)', 
+              fontWeight: activeTab === 'caterings' ? 700 : 500, 
+              fontSize: '0.85rem', 
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              outline: 'none'
+            }}
+          >
+            🍽️ Catering Leads
+          </button>
         </div>
 
-        {/* Chat List */}
-        <div className="chat-list">
-          {filteredChats.map(chat => (
-            <div 
-              key={chat.id} 
-              className={`chat-item ${activeChat && activeChat.id === chat.id ? 'active' : ''}`}
-              onClick={() => setActiveChat(chat)}
-            >
-              <div className="avatar">{getAvatarChar(chat.name)}</div>
-              <div className="chat-item-info">
-                <div className="chat-item-header">
-                  <span className="chat-name">{chat.name}</span>
-                  <span className="chat-time">{formatTime(chat.timestamp)}</span>
-                </div>
-                <div className="chat-item-body">
-                  <span className="chat-last-message">{chat.lastMessage || 'No messages yet'}</span>
-                  <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexShrink: 0 }}>
-                    {chat.unanswered && (
-                      <span 
-                        style={{ 
-                          fontSize: '0.62rem', 
-                          fontWeight: '700', 
-                          color: '#53bdeb', 
-                          border: '1px solid #53bdeb', 
-                          borderRadius: '4px', 
-                          padding: '1px 5px', 
-                          textTransform: 'uppercase', 
-                          letterSpacing: '0.3px' 
-                        }}
-                        title="Unanswered - needs action"
-                      >
-                        Needs Action
-                      </span>
-                    )}
-                    {chat.unreadCount > 0 && <span className="unread-count">{chat.unreadCount}</span>}
-                  </div>
-                </div>
+        {activeTab === 'chats' ? (
+          <>
+            {/* Search */}
+            <div className="search-container">
+              <div className="search-box">
+                <span></span>
+                <input 
+                  type="text" 
+                  className="search-input" 
+                  placeholder="Search or start new chat" 
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
               </div>
             </div>
-          ))}
-          {filteredChats.length === 0 && (
-            <div className="placeholder-text" style={{marginTop: '2rem', textAlign: 'center', color: 'var(--text-muted)'}}>No chats found.</div>
-          )}
-        </div>
+
+            {/* Chat List */}
+            <div className="chat-list">
+              {filteredChats.map(chat => (
+                <div 
+                  key={chat.id} 
+                  className={`chat-item ${activeChat && activeChat.id === chat.id ? 'active' : ''}`}
+                  onClick={() => setActiveChat(chat)}
+                >
+                  <div className="avatar">{getAvatarChar(chat.name)}</div>
+                  <div className="chat-item-info">
+                    <div className="chat-item-header">
+                      <span className="chat-name">{chat.name}</span>
+                      <span className="chat-time">{formatTime(chat.timestamp)}</span>
+                    </div>
+                    <div className="chat-item-body">
+                      <span className="chat-last-message">{chat.lastMessage || 'No messages yet'}</span>
+                      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexShrink: 0 }}>
+                        {chat.unanswered && (
+                          <span 
+                            style={{ 
+                              fontSize: '0.62rem', 
+                              fontWeight: '700', 
+                              color: '#53bdeb', 
+                              border: '1px solid #53bdeb', 
+                              borderRadius: '4px', 
+                              padding: '1px 5px', 
+                              textTransform: 'uppercase', 
+                              letterSpacing: '0.3px' 
+                            }}
+                            title="Unanswered - needs action"
+                          >
+                            Needs Action
+                          </span>
+                        )}
+                        {chat.unreadCount > 0 && <span className="unread-count">{chat.unreadCount}</span>}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {filteredChats.length === 0 && (
+                <div className="placeholder-text" style={{marginTop: '2rem', textAlign: 'center', color: 'var(--text-muted)'}}>No chats found.</div>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Catering Search */}
+            <div className="search-container">
+              <div className="search-box">
+                <span></span>
+                <input 
+                  type="text" 
+                  className="search-input" 
+                  placeholder="Search catering leads..." 
+                  value={cateringSearchTerm}
+                  onChange={(e) => setCateringSearchTerm(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {/* Catering Leads List */}
+            <div className="chat-list">
+              {loadingCaterings ? (
+                <div className="placeholder-text" style={{marginTop: '2rem', textAlign: 'center', color: 'var(--text-muted)'}}>Loading leads...</div>
+              ) : (
+                (() => {
+                  const filteredCaterings = cateringLeads.filter(lead => 
+                    (lead.customer_name || '').toLowerCase().includes(cateringSearchTerm.toLowerCase()) ||
+                    (lead.phone || '').includes(cateringSearchTerm)
+                  );
+                  return (
+                    <>
+                      {filteredCaterings.map(lead => {
+                        const jid = `${sanitizePhone(lead.phone)}@c.us`;
+                        const isSelected = activeChat && activeChat.id === jid && activeChat.isCateringLead;
+                        return (
+                          <div 
+                            key={lead.id} 
+                            className={`chat-item ${isSelected ? 'active' : ''}`}
+                            onClick={() => setActiveChat({
+                              id: jid,
+                              name: lead.customer_name || 'Customer',
+                              lastMessage: lead.event_title || '',
+                              timestamp: Math.floor(new Date(lead.created_at).getTime() / 1000),
+                              unreadCount: 0,
+                              unanswered: false,
+                              isCateringLead: true,
+                              cateringDetails: lead
+                            })}
+                          >
+                            <div className="avatar" style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)' }}>
+                              {getAvatarChar(lead.customer_name || 'C')}
+                            </div>
+                            <div className="chat-item-info">
+                              <div className="chat-item-header">
+                                <span className="chat-name">{lead.customer_name || 'Customer'}</span>
+                                <span className="chat-time" style={{ fontSize: '0.7rem' }}>
+                                  {new Date(lead.created_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                                </span>
+                              </div>
+                              <div className="chat-item-body">
+                                <span className="chat-last-message">{lead.event_title || lead.phone || 'No event title'}</span>
+                                <span style={{ 
+                                  fontSize: '0.6rem', 
+                                  fontWeight: '700', 
+                                  color: lead.status === 'new' ? '#10b981' : 'var(--text-muted)', 
+                                  border: `1px solid ${lead.status === 'new' ? '#10b981' : 'var(--border-color)'}`, 
+                                  borderRadius: '4px', 
+                                  padding: '1px 5px', 
+                                  textTransform: 'uppercase' 
+                                }}>
+                                  {lead.status || 'NEW'}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {filteredCaterings.length === 0 && (
+                        <div className="placeholder-text" style={{marginTop: '2rem', textAlign: 'center', color: 'var(--text-muted)'}}>No catering leads found.</div>
+                      )}
+                    </>
+                  );
+                })()
+              )}
+            </div>
+          </>
+        )}
 
         {/* Bottom Menu / Footer - Emulating Mobile Tab Bar */}
         <div className="sidebar-footer" style={{ borderTop: '1px solid var(--border-color)', background: 'var(--panel-bg)', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -790,6 +955,7 @@ export default function App() {
                       setActiveChat(null);
                       setMessages([]);
                       setCrmContext(null);
+                      setCrmType('');
                       setChats([]);
                     }
                   }}
@@ -875,6 +1041,7 @@ export default function App() {
                       setActiveChat(null);
                       setMessages([]);
                       setCrmContext(null);
+                      setCrmType('');
                       setChats([]);
                       setIsCreatingNewTenant(false);
                       setStatus('INITIALIZING');
@@ -1154,178 +1321,253 @@ export default function App() {
       </div>
 
       {/* Right Sidebar: CRM Context */}
-      {activeChat && (
-        <div className="crm-sidebar" style={{ 
-          display: 'flex', 
-          flexDirection: 'column', 
-          gap: '1rem', 
-          color: 'var(--text-main)',
-          background: 'linear-gradient(180deg, var(--panel-bg) 0%, var(--bg-dark) 100%)',
-          borderLeft: '1px solid rgba(255,255,255,0.05)',
-          padding: '1.25rem',
-          boxShadow: '-4px 0 15px rgba(0,0,0,0.2)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.75rem', marginBottom: '0.5rem' }}>
-            <span style={{ fontSize: '1.25rem' }}>📊</span>
-            <h3 style={{ fontSize: '1.1rem', color: '#fff', margin: 0, fontWeight: 600, fontFamily: 'var(--font-display)' }}>Chef CRM Context</h3>
-          </div>
-          
-          {loadingCrm ? (
-            <div style={{ 
-              display: 'flex', 
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100%',
-              textAlign: 'center', 
-              background: 'rgba(255,255,255,0.02)',
-              borderRadius: '12px',
-              border: '1px dashed rgba(255,255,255,0.1)',
-              padding: '2rem 1rem'
-            }}>
-              <div className="sync-bar-progress" style={{ width: '40px', height: '40px', borderRadius: '50%', animation: 'spin 1s linear infinite', border: '3px solid transparent', borderTopColor: 'var(--accent-blue)', borderRightColor: 'var(--accent-blue)', background: 'transparent' }}></div>
-              <div style={{ fontWeight: 600, color: '#fff', marginTop: '1rem' }}>Fetching Profile...</div>
-              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Searching CRM database</div>
+      {activeChat && (() => {
+        const isCatering = activeChat?.isCateringLead || crmType === 'catering';
+        const cateringData = activeChat?.isCateringLead ? activeChat.cateringDetails : (crmType === 'catering' ? crmContext : null);
+        const customerName = activeChat?.isCateringLead ? activeChat.name : (crmType === 'catering' ? crmContext?.customer_name : '');
+        const displayJid = activeChat.id ? activeChat.id.split('@')[0] : '';
+
+        return (
+          <div className="crm-sidebar" style={{ 
+            display: 'flex', 
+            flexDirection: 'column', 
+            gap: '1rem', 
+            color: 'var(--text-main)',
+            background: 'linear-gradient(180deg, var(--panel-bg) 0%, var(--bg-dark) 100%)',
+            borderLeft: '1px solid rgba(255,255,255,0.05)',
+            padding: '1.25rem',
+            boxShadow: '-4px 0 15px rgba(0,0,0,0.2)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.75rem', marginBottom: '0.5rem' }}>
+              <span style={{ fontSize: '1.25rem' }}>{isCatering ? '🍽️' : '📊'}</span>
+              <h3 style={{ fontSize: '1.1rem', color: '#fff', margin: 0, fontWeight: 600, fontFamily: 'var(--font-display)' }}>
+                {isCatering ? 'Catering Lead Context' : 'Chef CRM Context'}
+              </h3>
             </div>
-          ) : crmError ? (
-            <div style={{ 
-              display: 'flex', 
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100%',
-              textAlign: 'center', 
-              background: 'rgba(239, 68, 68, 0.05)',
-              borderRadius: '12px',
-              border: '1px dashed rgba(239, 68, 68, 0.2)',
-              padding: '2rem 1rem'
-            }}>
-              <div style={{ fontSize: '3rem', marginBottom: '1rem', opacity: 0.8 }}>⚠️</div>
-              <div style={{ fontWeight: 600, color: '#ef4444', marginBottom: '0.5rem' }}>Lookup Failed</div>
-              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>{crmError}</div>
-            </div>
-          ) : crmContext ? (
-            <React.Fragment>
-              <div style={{ 
-                background: 'rgba(255,255,255,0.03)', 
-                border: '1px solid rgba(255,255,255,0.05)',
-                padding: '1rem', 
-                borderRadius: '12px',
-                backdropFilter: 'blur(10px)'
-              }}>
-                <h4 style={{ margin: '0 0 0.75rem 0', color: 'var(--accent-blue)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <span>🧑‍🍳</span> Core Profile
-                </h4>
-                <div style={{ fontSize: '0.95rem', marginBottom: '0.5rem', color: '#fff', fontWeight: 500 }}>{crmContext.chef_name || <span style={{color: 'var(--text-muted)', fontStyle: 'italic'}}>Unnamed Chef</span>}</div>
-                
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginTop: '0.5rem' }}>
-                  <span style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem', borderRadius: '4px', background: 'rgba(83, 189, 235, 0.1)', color: 'var(--accent-blue)', border: '1px solid rgba(83, 189, 235, 0.2)' }}>
-                    {crmContext.plan ? crmContext.plan.toUpperCase() : 'NO PLAN'}
-                  </span>
-                  <span style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem', borderRadius: '4px', background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-muted)', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
-                    📍 {crmContext.city || 'No City'}
-                  </span>
+            
+            {isCatering ? (
+              <React.Fragment>
+                <div style={{ 
+                  background: 'rgba(255,255,255,0.03)', 
+                  border: '1px solid rgba(255,255,255,0.05)',
+                  padding: '1rem', 
+                  borderRadius: '12px',
+                  backdropFilter: 'blur(10px)'
+                }}>
+                  <h4 style={{ margin: '0 0 0.75rem 0', color: 'var(--accent-blue)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <span>📋</span> Lead Details
+                  </h4>
+                  <div style={{ fontSize: '0.95rem', marginBottom: '0.5rem', color: '#fff', fontWeight: 500 }}>
+                    {customerName || 'Unnamed Lead'}
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    <div>📞 {displayJid}</div>
+                    {cateringData?.city && <div>📍 {cateringData.city}</div>}
+                    {cateringData?.created_at && <div>📅 Created: {new Date(cateringData.created_at).toLocaleDateString()}</div>}
+                    {cateringData?.status && (
+                      <div style={{ marginTop: '0.2rem' }}>
+                        Status: <span style={{ fontWeight: 600, color: 'var(--accent-blue)', background: 'rgba(83, 189, 235, 0.1)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem', textTransform: 'uppercase' }}>{cateringData.status}</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                
-                {crmContext.business_name && (
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <span>🏢</span> {crmContext.business_name}
+
+                {cateringData && (
+                  <div style={{ 
+                    background: 'rgba(255,255,255,0.03)', 
+                    border: '1px solid rgba(255,255,255,0.05)',
+                    padding: '1rem', 
+                    borderRadius: '12px',
+                    backdropFilter: 'blur(10px)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.75rem',
+                    maxHeight: '450px',
+                    overflowY: 'auto'
+                  }}>
+                    <h4 style={{ margin: '0', color: 'var(--accent-blue)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      🍽️ Questionnaire
+                    </h4>
+                    
+                    {cateringData.metadata && Object.entries(cateringData.metadata).map(([key, value]) => {
+                      if (!value || typeof value === 'object') return null;
+                      const displayKey = key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                      return (
+                        <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{displayKey}</span>
+                          <span style={{ fontSize: '0.85rem', color: 'var(--text-main)', wordBreak: 'break-word' }}>{String(value)}</span>
+                        </div>
+                      );
+                    })}
+                    
+                    {cateringData.raw_text && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '0.5rem', marginTop: '0.5rem' }}>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Message / Raw Text</span>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-main)', whiteSpace: 'pre-wrap', lineHeight: 1.4 }}>
+                          {cateringData.raw_text}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
-
+              </React.Fragment>
+            ) : loadingCrm ? (
               <div style={{ 
-                background: 'rgba(255,255,255,0.03)', 
-                border: '1px solid rgba(255,255,255,0.05)',
-                padding: '1rem', 
+                display: 'flex', 
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '100%',
+                textAlign: 'center', 
+                background: 'rgba(255,255,255,0.02)',
                 borderRadius: '12px',
-                marginTop: '1rem',
-                backdropFilter: 'blur(10px)'
+                border: '1px dashed rgba(255,255,255,0.1)',
+                padding: '2rem 1rem'
               }}>
-                <h4 style={{ margin: '0 0 0.75rem 0', color: '#10b981', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <span>📋</span> Compliance Status
-                </h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', fontSize: '0.85rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ color: 'var(--text-muted)' }}>Food Safety (NVWA)</span>
-                    <span style={{ fontWeight: 600, color: crmContext.food_safety_status === 'passed' ? '#10b981' : (crmContext.food_safety_status ? '#f59e0b' : 'var(--text-muted)') }}>
-                      {crmContext.food_safety_status ? crmContext.food_safety_status.toUpperCase() : 'PENDING'}
+                <div className="sync-bar-progress" style={{ width: '40px', height: '40px', borderRadius: '50%', animation: 'spin 1s linear infinite', border: '3px solid transparent', borderTopColor: 'var(--accent-blue)', borderRightColor: 'var(--accent-blue)', background: 'transparent' }}></div>
+                <div style={{ fontWeight: 600, color: '#fff', marginTop: '1rem' }}>Fetching Profile...</div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Searching CRM database</div>
+              </div>
+            ) : crmError ? (
+              <div style={{ 
+                display: 'flex', 
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '100%',
+                textAlign: 'center', 
+                background: 'rgba(239, 68, 68, 0.05)',
+                borderRadius: '12px',
+                border: '1px dashed rgba(239, 68, 68, 0.2)',
+                padding: '2rem 1rem'
+              }}>
+                <div style={{ fontSize: '3rem', marginBottom: '1rem', opacity: 0.8 }}>⚠️</div>
+                <div style={{ fontWeight: 600, color: '#ef4444', marginBottom: '0.5rem' }}>Lookup Failed</div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>{crmError}</div>
+              </div>
+            ) : crmContext ? (
+              <React.Fragment>
+                <div style={{ 
+                  background: 'rgba(255,255,255,0.03)', 
+                  border: '1px solid rgba(255,255,255,0.05)',
+                  padding: '1rem', 
+                  borderRadius: '12px',
+                  backdropFilter: 'blur(10px)'
+                }}>
+                  <h4 style={{ margin: '0 0 0.75rem 0', color: 'var(--accent-blue)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <span>🧑‍🍳</span> Core Profile
+                  </h4>
+                  <div style={{ fontSize: '0.95rem', marginBottom: '0.5rem', color: '#fff', fontWeight: 500 }}>{crmContext.chef_name || <span style={{color: 'var(--text-muted)', fontStyle: 'italic'}}>Unnamed Chef</span>}</div>
+                  
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginTop: '0.5rem' }}>
+                    <span style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem', borderRadius: '4px', background: 'rgba(83, 189, 235, 0.1)', color: 'var(--accent-blue)', border: '1px solid rgba(83, 189, 235, 0.2)' }}>
+                      {crmContext.plan ? crmContext.plan.toUpperCase() : 'NO PLAN'}
+                    </span>
+                    <span style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem', borderRadius: '4px', background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-muted)', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                      📍 {crmContext.city || 'No City'}
                     </span>
                   </div>
                   
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ color: 'var(--text-muted)' }}>KVK Registration</span>
-                    <span style={{ fontWeight: 600, color: crmContext.kvk_status === 'approved' ? '#10b981' : (crmContext.kvk_status ? '#f59e0b' : 'var(--text-muted)') }}>
-                      {crmContext.kvk_status ? crmContext.kvk_status.toUpperCase() : 'PENDING'}
-                    </span>
-                  </div>
+                  {crmContext.business_name && (
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <span>🏢</span> {crmContext.business_name}
+                    </div>
+                  )}
+                </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ color: 'var(--text-muted)' }}>Kitchen Check (AI)</span>
-                    <span style={{ fontWeight: 600, color: crmContext.chef_verification?.[0]?.kitchen_status === 'approved' ? '#10b981' : 'var(--text-muted)' }}>
-                      {crmContext.chef_verification?.[0]?.kitchen_status ? crmContext.chef_verification[0].kitchen_status.toUpperCase() : 'NOT SUBMITTED'}
-                    </span>
+                <div style={{ 
+                  background: 'rgba(255,255,255,0.03)', 
+                  border: '1px solid rgba(255,255,255,0.05)',
+                  padding: '1rem', 
+                  borderRadius: '12px',
+                  marginTop: '1rem',
+                  backdropFilter: 'blur(10px)'
+                }}>
+                  <h4 style={{ margin: '0 0 0.75rem 0', color: '#10b981', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <span>📋</span> Compliance Status
+                  </h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', fontSize: '0.85rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Food Safety (NVWA)</span>
+                      <span style={{ fontWeight: 600, color: crmContext.food_safety_status === 'passed' ? '#10b981' : (crmContext.food_safety_status ? '#f59e0b' : 'var(--text-muted)') }}>
+                        {crmContext.food_safety_status ? crmContext.food_safety_status.toUpperCase() : 'PENDING'}
+                      </span>
+                    </div>
+                    
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>KVK Registration</span>
+                      <span style={{ fontWeight: 600, color: crmContext.kvk_status === 'approved' ? '#10b981' : (crmContext.kvk_status ? '#f59e0b' : 'var(--text-muted)') }}>
+                        {crmContext.kvk_status ? crmContext.kvk_status.toUpperCase() : 'PENDING'}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Kitchen Check (AI)</span>
+                      <span style={{ fontWeight: 600, color: crmContext.chef_verification?.[0]?.kitchen_status === 'approved' ? '#10b981' : 'var(--text-muted)' }}>
+                        {crmContext.chef_verification?.[0]?.kitchen_status ? crmContext.chef_verification[0].kitchen_status.toUpperCase() : 'NOT SUBMITTED'}
+                      </span>
+                    </div>
                   </div>
                 </div>
-              </div>
 
+                <div style={{ 
+                  background: 'rgba(255,255,255,0.03)', 
+                  border: '1px solid rgba(255,255,255,0.05)',
+                  padding: '1rem', 
+                  borderRadius: '12px',
+                  marginTop: '1rem',
+                  backdropFilter: 'blur(10px)'
+                }}>
+                  <h4 style={{ margin: '0 0 0.75rem 0', color: '#f59e0b', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <span>🚀</span> Onboarding Progress
+                  </h4>
+                  
+                  {crmContext.chef_onboarding_steps && crmContext.chef_onboarding_steps.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                      {crmContext.chef_onboarding_steps.map((step, idx) => (
+                        <div key={idx} style={{ 
+                          fontSize: '0.85rem', 
+                          display: 'flex', 
+                          alignItems: 'flex-start', 
+                          gap: '0.5rem',
+                          padding: '0.4rem',
+                          background: step.is_completed ? 'rgba(16, 185, 129, 0.05)' : 'transparent',
+                          borderRadius: '6px'
+                        }}>
+                          <span style={{ marginTop: '2px' }}>{step.is_completed ? '✅' : '⏳'}</span>
+                          <span style={{ color: step.is_completed ? '#fff' : 'var(--text-muted)' }}>{step.step_name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: '1rem 0', color: 'var(--text-muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>
+                      No onboarding steps recorded yet.
+                    </div>
+                  )}
+                </div>
+              </React.Fragment>
+            ) : (
               <div style={{ 
-                background: 'rgba(255,255,255,0.03)', 
-                border: '1px solid rgba(255,255,255,0.05)',
-                padding: '1rem', 
+                display: 'flex', 
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '100%',
+                textAlign: 'center', 
+                color: 'var(--text-muted)', 
+                background: 'rgba(255, 255, 255, 0.02)',
                 borderRadius: '12px',
-                marginTop: '1rem',
-                backdropFilter: 'blur(10px)'
+                border: '1px dashed rgba(255, 255, 255, 0.1)',
+                padding: '2rem 1rem'
               }}>
-                <h4 style={{ margin: '0 0 0.75rem 0', color: '#f59e0b', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <span>🚀</span> Onboarding Progress
-                </h4>
-                
-                {crmContext.chef_onboarding_steps && crmContext.chef_onboarding_steps.length > 0 ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                    {crmContext.chef_onboarding_steps.map((step, idx) => (
-                      <div key={idx} style={{ 
-                        fontSize: '0.85rem', 
-                        display: 'flex', 
-                        alignItems: 'flex-start', 
-                        gap: '0.5rem',
-                        padding: '0.4rem',
-                        background: step.is_completed ? 'rgba(16, 185, 129, 0.05)' : 'transparent',
-                        borderRadius: '6px'
-                      }}>
-                        <span style={{ marginTop: '2px' }}>{step.is_completed ? '✅' : '⏳'}</span>
-                        <span style={{ color: step.is_completed ? '#fff' : 'var(--text-muted)' }}>{step.step_name}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ textAlign: 'center', padding: '1rem 0', color: 'var(--text-muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>
-                    No onboarding steps recorded yet.
-                  </div>
-                )}
+                <div style={{ fontSize: '3rem', marginBottom: '1rem', opacity: 0.5 }}>🕵️‍♂️</div>
+                <div style={{ fontWeight: 600, color: '#fff', marginBottom: '0.5rem' }}>No CRM Profile Found</div>
+                <div style={{ fontSize: '0.85rem', lineHeight: '1.4' }}>This WhatsApp number is not registered as an active Chef or Catering Lead in the database.</div>
               </div>
-            </React.Fragment>
-          ) : (
-            <div style={{ 
-              display: 'flex', 
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100%',
-              textAlign: 'center', 
-              color: 'var(--text-muted)', 
-              background: 'rgba(255,255,255,0.02)',
-              borderRadius: '12px',
-              border: '1px dashed rgba(255,255,255,0.1)',
-              padding: '2rem 1rem'
-            }}>
-              <div style={{ fontSize: '3rem', marginBottom: '1rem', opacity: 0.5 }}></div>
-              <div style={{ fontWeight: 600, color: '#fff', marginBottom: '0.5rem' }}>No CRM Profile Found</div>
-              <div style={{ fontSize: '0.85rem', lineHeight: '1.4' }}>This WhatsApp number is not registered as an active Chef in the database.</div>
-            </div>
-          )}
-        </div>
-      )}
+            )}
+          </div>
+        );
+      })()}
 
       {/* Settings Modal */}
       {showSettings && (
@@ -1401,6 +1643,25 @@ export default function App() {
                 </label>
                 <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginLeft: '1.5rem' }}>
                   When checked, this account will instantly dispatch a "Hey, we missed you" message if an admin marks a lead as <code>no_answer</code> in the CRM layer.
+                </span>
+              </div>
+
+              {/* Catering No Answer Auto-Followup */}
+              <div style={{ marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1.2rem' }}>
+                <h3 style={{ fontSize: '1rem', color: 'var(--accent-green)', marginBottom: '0.4rem' }}>🍽️ Catering "No Answer" Followup</h3>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem', marginBottom: '0.3rem' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={brainConfig.cateringNoAnswerFollowupEnabled || false}
+                    onChange={(e) => setBrainConfig({
+                      ...brainConfig,
+                      cateringNoAnswerFollowupEnabled: e.target.checked
+                    })}
+                  />
+                  <span>Automatically send WhatsApp followups when Catering Lead status changes</span>
+                </label>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginLeft: '1.5rem' }}>
+                  When checked, this account will instantly dispatch a followup message if an admin marks a catering lead as <code>no_answer</code> in the CRM.
                 </span>
               </div>
 
