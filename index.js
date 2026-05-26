@@ -524,6 +524,19 @@ async function getChefContext(jid, client = null) {
 
             if (data && data.length > 0) {
                 const profile = data[0];
+                
+                // Fetch deeper usage context
+                try {
+                    const [activitiesRes, menusRes] = await Promise.all([
+                        crmSupabase.from('chef_activities').select('activity_type, description, created_at').eq('chef_id', profile.id).order('created_at', {ascending: false}).limit(10),
+                        crmSupabase.from('menus').select('summary, is_active').eq('chef_profile_id', profile.id).limit(5)
+                    ]);
+                    profile.recent_activities = activitiesRes.data || [];
+                    profile.menus = menusRes.data || [];
+                } catch(e) {
+                    console.error('[CRM] Error fetching deeper context:', e.message);
+                }
+
                 console.log(`[CRM] Profile matched for phone ${rawPhone}: ${profile.chef_name || profile.id}`);
                 crmContextCache.set(targetJid, profile);
                 if (targetJid !== jid) crmContextCache.set(jid, profile);
@@ -750,8 +763,9 @@ async function evaluateImportance(msgBody, config) {
         try {
             const prompt = `Analyze this incoming WhatsApp message: "${msgBody}"
 Decide if this message is important enough to require urgent human attention (e.g. business inquiries, custom requests, pricing quotes, client booking demands, complaints, bugs/technical issues).
-If it is important, respond with exactly: IMPORTANT
-If it is a minor greeting, status update, spam, or simple gratitude/acknowledgment (like 'ok', 'thanks', 'hello'), respond with exactly: NOT_IMPORTANT.`;
+CRITICAL: You MUST ignore random emojis, crazy status updates, spam, minor greetings, short nonsensical texts, and simple gratitude/acknowledgment (like 'ok', 'thanks', 'hello'). Only flag actually important, actionable inquiries.
+If it is truly important, respond with exactly: IMPORTANT
+Otherwise, respond with exactly: NOT_IMPORTANT.`;
             const result = await callAIProvider(prompt, config);
             return result.toUpperCase().includes('IMPORTANT') && !result.toUpperCase().includes('NOT_IMPORTANT');
         } catch (e) {
@@ -984,21 +998,27 @@ class SessionManager {
                 }
             }
 
-            // 2. Evaluate Importance & send WhatsApp Notification (Only for tenant 'tia' and not from admin)
-            if (tenantId === 'tia' && phone !== '3197010208809') {
+            // 2. Evaluate Importance & Log Interaction
+            let isImportant = false;
+            if (phone !== '3197010208809') {
                 try {
-                    const isImportant = await evaluateImportance(msg.body, config);
+                    isImportant = await evaluateImportance(msg.body, config);
                     if (isImportant) {
-                        const targetPhone = '3197010208809';
-                        const targetJid = `${targetPhone}@c.us`;
-                        const alertText = `⚠️ *Urgent WhatsApp Handoff Alert (Tia)*\n*Contact*: ${phone}\n*Message*: "${msg.body}"\n\nPlease reply accordingly on the dashboard.`;
-
-                        console.log(`[Alert] Live important message flagged for Tia. Queueing WhatsApp alert to ${targetJid}`);
-                        sessionManager.queueMessage('tia', targetJid, alertText);
+                        console.log(`[Alert] Live important message flagged for tenant ${tenantId}. Pre-flagged in database.`);
                     }
                 } catch (err) {
                     console.error(`[Alert] Importance evaluation failed for tenant ${tenantId}:`, err.message);
                 }
+            }
+
+            if (crmSupabase) {
+                crmSupabase.from('whatsapp_chat_history').insert({
+                    tenant_id: tenantId,
+                    phone: phone,
+                    direction: 'INCOMING',
+                    message_body: msg.body,
+                    is_important: isImportant
+                }).catch(err => console.error('[History] INCOMING Insert failed:', err.message));
             }
 
             // 3. Welcome Message Auto-Reply Trigger
@@ -1042,11 +1062,27 @@ class SessionManager {
             if (config.aiAgent && config.aiAgent.enabled && hasApiKey) {
                 console.log(`[Agent] Generating automated AI response for JID: ${jid} on tenant ${tenantId}`);
                 try {
-                    const chat = await msg.getChat();
-                    const msgs = await chat.fetchMessages({ limit: 8 });
+                    let finalMsgs = [];
+                    if (crmSupabase) {
+                        const { data } = await crmSupabase.from('whatsapp_chat_history')
+                            .select('direction, message_body')
+                            .eq('phone', phone)
+                            .order('created_at', { ascending: false })
+                            .limit(30);
+                        if (data && data.length > 0) {
+                            finalMsgs = data.reverse().map(m => ({
+                                fromMe: m.direction === 'OUTGOING',
+                                body: m.message_body
+                            }));
+                        }
+                    }
+                    if (finalMsgs.length === 0) {
+                        const chat = await msg.getChat();
+                        finalMsgs = await chat.fetchMessages({ limit: 8 });
+                    }
 
                     const chefContext = await getChefContext(jid, client);
-                    const prompt = constructAIPrompt(msgs, msg.body, config, chefContext);
+                    const prompt = constructAIPrompt(finalMsgs, msg.body, config, chefContext);
                     const reply = await callAIProvider(prompt, config);
 
                     if (reply && reply !== 'NO_RESPONSE_NEEDED') {
@@ -1071,6 +1107,16 @@ class SessionManager {
                     body: msg.body,
                     timestamp: Date.now()
                 });
+
+                if (crmSupabase) {
+                    crmSupabase.from('whatsapp_chat_history').insert({
+                        tenant_id: tenantId,
+                        phone: phone,
+                        direction: 'OUTGOING',
+                        message_body: msg.body,
+                        is_important: false
+                    }).catch(err => console.error('[History] OUTGOING Insert failed:', err.message));
+                }
             }
         });
 
@@ -1267,7 +1313,7 @@ if (supabase) {
 
         const jid = `${sanitizedPhone}@c.us`;
         const firstName = name.trim().split(' ')[0] || '';
-        const welcomeText = `hey, its tia from homemade\n\nthank you so much for signing up for a private chef${firstName ? ', ' + firstName : ''}! can you provide your city and confirm the dates so we can proceed and communicate it with a chef?`;
+        const welcomeText = `Hey! This is Tia from Homemade.\n\nThank you so much for signing up for a private chef${firstName ? ', ' + firstName : ''}! Can you provide your city so we're able to match you up with a Chef in your area?`;
 
         for (const senderTenantId of activeSenders) {
             console.log(`[Catering-Welcome] 📩 Queueing welcome message for catering lead ${sanitizedPhone} (${name}) on tenant: ${senderTenantId}`);
@@ -2074,8 +2120,24 @@ app.post('/api/:tenantId/suggest-response', async (req, res) => {
         const hasApiKey = process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY || (config.aiAgent && config.aiAgent.apiKey);
 
         if (config.aiAgent && hasApiKey) {
+            let finalMsgs = msgs;
+            if (crmSupabase) {
+                const phone = jid.split('@')[0];
+                const { data } = await crmSupabase.from('whatsapp_chat_history')
+                    .select('direction, message_body')
+                    .eq('phone', phone)
+                    .order('created_at', { ascending: false })
+                    .limit(30);
+                if (data && data.length > 0) {
+                    finalMsgs = data.reverse().map(m => ({
+                        fromMe: m.direction === 'OUTGOING',
+                        body: m.message_body
+                    }));
+                }
+            }
+
             const chefContext = await getChefContext(jid);
-            const prompt = constructAIPrompt(msgs, lastMsgBody, config, chefContext);
+            const prompt = constructAIPrompt(finalMsgs, lastMsgBody, config, chefContext);
             try {
                 const replyText = await callAIProvider(prompt, config);
                 if (replyText === 'NO_RESPONSE_NEEDED') {
@@ -2185,42 +2247,46 @@ cron.schedule('0 18 * * *', async () => {
         return;
     }
 
-    const classifierConfig = {
-        aiAgent: {
-            provider: 'gemini',
-            apiKey: process.env.GEMINI_API_KEY,
-            systemPrompt: 'You are an analytical AI.'
-        }
-    };
-
     try {
-        const chats = await client.getChats();
-        const apiKey = process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY;
+        if (!crmSupabase) {
+            console.error('[Cron] CRM Supabase not connected. Cannot generate report.');
+            return;
+        }
 
-        for (const chat of chats) {
-            if (chat.isGroup) continue;
+        // Fetch all INCOMING important messages from the last 24 hours
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const { data: importantMsgs } = await crmSupabase
+            .from('whatsapp_chat_history')
+            .select('*')
+            .eq('tenant_id', tenantId)
+            .eq('direction', 'INCOMING')
+            .eq('is_important', true)
+            .gte('created_at', twentyFourHoursAgo)
+            .order('created_at', { ascending: false });
 
-            // Skip reporting on the admin notification number itself
-            if (chat.id.user === '3197010208809') continue;
+        if (importantMsgs && importantMsgs.length > 0) {
+            // Group by phone to get the latest important message
+            const phoneMap = new Map();
+            for (const msg of importantMsgs) {
+                if (!phoneMap.has(msg.phone)) {
+                    phoneMap.set(msg.phone, msg);
+                }
+            }
 
-            // Only consider chats with unread messages or where the last message is from the client
-            const messages = await chat.fetchMessages({ limit: 5 });
-            if (messages.length === 0) continue;
+            for (const [phone, msg] of phoneMap.entries()) {
+                // Check if we replied since this message
+                const { data: replies } = await crmSupabase
+                    .from('whatsapp_chat_history')
+                    .select('id')
+                    .eq('tenant_id', tenantId)
+                    .eq('phone', phone)
+                    .eq('direction', 'OUTGOING')
+                    .gt('created_at', msg.created_at)
+                    .limit(1);
 
-            const lastMsg = messages[messages.length - 1];
-            if (lastMsg.fromMe) continue; // We replied recently.
-
-            if (apiKey) {
-                const prompt = `Analyze this chat history. The last message is from the client. Does this message reasonably require a response or follow-up from the agent? \nIf it's just a simple 'ok', 'thanks', 'cool', '👍', or a conversational ender, return exactly "NO". \nIf it contains a question, a complaint, or requires an operational response, return exactly "YES".\n\nChat history:\n` + messages.map(m => `[${m.fromMe ? 'Agent' : 'Client'}]: ${m.body}`).join('\n');
-
-                try {
-                    const aiDecision = await callAIProvider(prompt, classifierConfig);
-                    if (aiDecision.trim().toUpperCase() === 'YES') {
-                        needsFollowUpCount++;
-                        reportText += `• *Chat*: ${chat.name}\n  *Phone*: ${chat.id.user}\n  *Last Message*: "${lastMsg.body}"\n\n`;
-                    }
-                } catch (e) {
-                    console.error(`[Cron] AI classification failed for ${chat.id.user}:`, e.message);
+                if (!replies || replies.length === 0) {
+                    needsFollowUpCount++;
+                    reportText += `• *Phone*: ${phone}\n  *Unreplied Important Escalation*: "${msg.message_body}"\n\n`;
                 }
             }
         }
