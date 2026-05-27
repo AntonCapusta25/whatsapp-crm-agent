@@ -337,8 +337,10 @@ export default function App() {
   };
 
   useEffect(() => {
-    loadTenants();
-  }, []);
+    if (isAuthenticated) {
+      loadTenants();
+    }
+  }, [isAuthenticated]);
 
   // Load Brain Config
   const loadBrainConfig = async () => {
@@ -354,8 +356,10 @@ export default function App() {
   };
 
   useEffect(() => {
-    loadBrainConfig();
-  }, [tenantId]);
+    if (isAuthenticated) {
+      loadBrainConfig();
+    }
+  }, [tenantId, isAuthenticated]);
 
   const saveBrainConfig = async (newConfig) => {
     try {
@@ -529,6 +533,8 @@ export default function App() {
 
   // SSE Event stream
   useEffect(() => {
+    if (!isAuthenticated) return;
+
     const eventSource = new EventSource(`/events?tenantId=${encodeURIComponent(tenantId)}`);
 
     eventSource.onmessage = (event) => {
@@ -611,7 +617,7 @@ export default function App() {
     return () => {
       eventSource.close();
     };
-  }, [tenantId]);
+  }, [tenantId, isAuthenticated]);
 
   // Render QR Code modal dynamically
   useEffect(() => {
@@ -676,11 +682,17 @@ export default function App() {
     <div className="app-container">
       {/* Status Loading Overlays */}
       {status === 'INITIALIZING' && (
-        <div className="loading-screen">
-          <div className="avatar" style={{width: '60px', height: '60px', fontSize: '1.8rem'}}>🤖</div>
-          <h2 style={{fontFamily: 'Outfit'}}>Initializing Agent Client</h2>
-          <p style={{color: 'var(--text-muted)'}}>Starting browser context for tenant: "{tenantId}"...</p>
-          <div className="sync-bar-bg"><div className="sync-bar-progress" style={{width: '100%', animation: 'spin 2s linear infinite'}}></div></div>
+        <div className="loading-screen" style={{ background: 'radial-gradient(circle at center, #111b21 0%, #0b141a 100%)', backdropFilter: 'blur(10px)' }}>
+          <div className="avatar" style={{width: '60px', height: '60px', fontSize: '1.8rem', animation: 'pulse 2s infinite', background: 'linear-gradient(135deg, #00a884 0%, #128c7e 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>🤖</div>
+          <h2 style={{fontFamily: 'Outfit', color: '#fff', marginTop: '1rem'}}>Initializing Agent Client</h2>
+          <p style={{color: 'var(--text-muted)', marginBottom: '1.5rem'}}>Starting browser context for tenant: "{tenantId}"...</p>
+          <div style={{width: '200px', height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden'}}>
+            <div style={{width: '30%', animation: 'loadingBar 1.5s ease-in-out infinite alternate', background: 'var(--accent-green)', height: '100%', borderRadius: '4px'}}></div>
+          </div>
+          <style>{`
+            @keyframes pulse { 0% { transform: scale(0.95); opacity: 0.8; } 50% { transform: scale(1.05); opacity: 1; } 100% { transform: scale(0.95); opacity: 0.8; } }
+            @keyframes loadingBar { 0% { transform: translateX(-100%); } 100% { transform: translateX(330%); } }
+          `}</style>
         </div>
       )}
 
@@ -739,7 +751,7 @@ export default function App() {
                 WA
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                <span style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-main)', letterSpacing: '0.2px' }}>WhatsApp Agent</span>
+                <span style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-main)', letterSpacing: '0.2px' }}>{brainConfig?.profileName || 'WhatsApp Agent'}</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <div className={`status-dot ${status === 'READY' ? 'ready' : ''}`}></div>
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 500, letterSpacing: '0.5px' }}>{status}</span>
@@ -1625,6 +1637,18 @@ export default function App() {
                 <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginLeft: '1.5rem' }}>
                   When checked, this account will greet new signups in the <code>booking_submissions</code> table (via Supabase Realtime / Polling).
                 </span>
+                {brainConfig.cateringWelcomeEnabled && (
+                  <div style={{ marginLeft: '1.5rem', marginTop: '0.8rem' }}>
+                    <textarea 
+                      className="chat-input"
+                      style={{ backgroundColor: 'var(--hover-chat)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.6rem', width: '100%', fontSize: '0.85rem', minHeight: '80px', resize: 'vertical' }}
+                      value={brainConfig.cateringWelcomeMessage || ''}
+                      onChange={(e) => setBrainConfig({ ...brainConfig, cateringWelcomeMessage: e.target.value })}
+                      placeholder="Enter welcome message. Use {Name} to insert lead's name."
+                    />
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>Use <code>{`{Name}`}</code> to dynamically insert the lead's first name.</div>
+                  </div>
+                )}
               </div>
 
               {/* CRM No Answer Auto-Followup */}
@@ -1644,6 +1668,18 @@ export default function App() {
                 <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginLeft: '1.5rem' }}>
                   When checked, this account will instantly dispatch a "Hey, we missed you" message if an admin marks a lead as <code>no_answer</code> in the CRM layer.
                 </span>
+                {brainConfig.noAnswerFollowupEnabled && (
+                  <div style={{ marginLeft: '1.5rem', marginTop: '0.8rem' }}>
+                    <textarea 
+                      className="chat-input"
+                      style={{ backgroundColor: 'var(--hover-chat)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.6rem', width: '100%', fontSize: '0.85rem', minHeight: '80px', resize: 'vertical' }}
+                      value={brainConfig.noAnswerFollowupMessage || ''}
+                      onChange={(e) => setBrainConfig({ ...brainConfig, noAnswerFollowupMessage: e.target.value })}
+                      placeholder="Enter no-answer followup message. Use {Name} to insert chef's name."
+                    />
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>Use <code>{`{Name}`}</code> to dynamically insert the chef's first name.</div>
+                  </div>
+                )}
               </div>
 
               {/* Catering No Answer Auto-Followup */}
@@ -1663,6 +1699,18 @@ export default function App() {
                 <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginLeft: '1.5rem' }}>
                   When checked, this account will instantly dispatch a followup message if an admin marks a catering lead as <code>no_answer</code> in the CRM.
                 </span>
+                {brainConfig.cateringNoAnswerFollowupEnabled && (
+                  <div style={{ marginLeft: '1.5rem', marginTop: '0.8rem' }}>
+                    <textarea 
+                      className="chat-input"
+                      style={{ backgroundColor: 'var(--hover-chat)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.6rem', width: '100%', fontSize: '0.85rem', minHeight: '80px', resize: 'vertical' }}
+                      value={brainConfig.cateringNoAnswerFollowupMessage || ''}
+                      onChange={(e) => setBrainConfig({ ...brainConfig, cateringNoAnswerFollowupMessage: e.target.value })}
+                      placeholder="Enter catering no-answer followup message. Use {Name} to insert lead's name."
+                    />
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>Use <code>{`{Name}`}</code> to dynamically insert the lead's first name.</div>
+                  </div>
+                )}
               </div>
 
               {/* SendGrid Email Alerts */}

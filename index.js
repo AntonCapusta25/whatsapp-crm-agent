@@ -277,8 +277,11 @@ async function restoreSessionFromSupabase(tenantId) {
 const DEFAULT_CONFIG = {
     profileName: "",
     cateringWelcomeEnabled: false,
+    cateringWelcomeMessage: "Hey! This is Tia from Homemade.\n\nThank you so much for signing up for a private chef{Name}! Can you provide your city so we're able to match you up with a Chef in your area?",
     noAnswerFollowupEnabled: false,
+    noAnswerFollowupMessage: "Hey{Name}, we tried calling you regarding your Homemade application but it looks like you were not available. Let us know when is a good time to reach you, or if you prefer, we can just chat right here!",
     cateringNoAnswerFollowupEnabled: false,
+    cateringNoAnswerFollowupMessage: "Hey{Name}, we tried calling you regarding your catering request but it looks like you were not available. Let us know when is a good time to reach you, or if you prefer, we can just chat right here!",
     welcomeMessage: {
         enabled: false,
         template: "Hello! Thank you for reaching out. How can I help you today? 🤖"
@@ -343,8 +346,11 @@ async function getBrainConfig(tenantId) {
                 return {
                     profileName: loaded.profileName || "",
                     cateringWelcomeEnabled: loaded.cateringWelcomeEnabled || false,
+                    cateringWelcomeMessage: loaded.cateringWelcomeMessage || DEFAULT_CONFIG.cateringWelcomeMessage,
                     noAnswerFollowupEnabled: loaded.noAnswerFollowupEnabled || false,
+                    noAnswerFollowupMessage: loaded.noAnswerFollowupMessage || DEFAULT_CONFIG.noAnswerFollowupMessage,
                     cateringNoAnswerFollowupEnabled: loaded.cateringNoAnswerFollowupEnabled || false,
+                    cateringNoAnswerFollowupMessage: loaded.cateringNoAnswerFollowupMessage || DEFAULT_CONFIG.cateringNoAnswerFollowupMessage,
                     welcomeMessage: { ...DEFAULT_CONFIG.welcomeMessage, ...loaded.welcomeMessage },
                     autoReply: { ...DEFAULT_CONFIG.autoReply, ...loaded.autoReply },
                     aiAgent: { ...DEFAULT_CONFIG.aiAgent, ...loaded.aiAgent },
@@ -369,8 +375,11 @@ async function getBrainConfig(tenantId) {
             return {
                 profileName: loaded.profileName || "",
                 cateringWelcomeEnabled: loaded.cateringWelcomeEnabled || false,
+                cateringWelcomeMessage: loaded.cateringWelcomeMessage || DEFAULT_CONFIG.cateringWelcomeMessage,
                 noAnswerFollowupEnabled: loaded.noAnswerFollowupEnabled || false,
+                noAnswerFollowupMessage: loaded.noAnswerFollowupMessage || DEFAULT_CONFIG.noAnswerFollowupMessage,
                 cateringNoAnswerFollowupEnabled: loaded.cateringNoAnswerFollowupEnabled || false,
+                cateringNoAnswerFollowupMessage: loaded.cateringNoAnswerFollowupMessage || DEFAULT_CONFIG.cateringNoAnswerFollowupMessage,
                 welcomeMessage: { ...DEFAULT_CONFIG.welcomeMessage, ...loaded.welcomeMessage },
                 autoReply: { ...DEFAULT_CONFIG.autoReply, ...loaded.autoReply },
                 aiAgent: { ...DEFAULT_CONFIG.aiAgent, ...loaded.aiAgent },
@@ -1299,7 +1308,7 @@ if (supabase) {
             try {
                 const config = await getBrainConfig(tId);
                 if (config.cateringWelcomeEnabled) {
-                    activeSenders.push(tId);
+                    activeSenders.push({ tId, config });
                 }
             } catch (err) {
                 console.error(`[Catering-Welcome] Error checking config for ${tId}:`, err.message);
@@ -1313,11 +1322,13 @@ if (supabase) {
 
         const jid = `${sanitizedPhone}@c.us`;
         const firstName = name.trim().split(' ')[0] || '';
-        const welcomeText = `Hey! This is Tia from Homemade.\n\nThank you so much for signing up for a private chef${firstName ? ', ' + firstName : ''}! Can you provide your city so we're able to match you up with a Chef in your area?`;
+        const nameReplacement = firstName ? ', ' + firstName : '';
 
-        for (const senderTenantId of activeSenders) {
-            console.log(`[Catering-Welcome] 📩 Queueing welcome message for catering lead ${sanitizedPhone} (${name}) on tenant: ${senderTenantId}`);
-            sessionManager.queueMessage(senderTenantId, jid, welcomeText);
+        for (const sender of activeSenders) {
+            const template = sender.config.cateringWelcomeMessage || DEFAULT_CONFIG.cateringWelcomeMessage;
+            const welcomeText = template.replace('{Name}', nameReplacement);
+            console.log(`[Catering-Welcome] 📩 Queueing welcome message for catering lead ${sanitizedPhone} (${name}) on tenant: ${sender.tId}`);
+            sessionManager.queueMessage(sender.tId, jid, welcomeText);
         }
     };
 
@@ -1378,7 +1389,7 @@ if (crmSupabase) {
                 if (sessionManager.getStatus(tId) !== 'READY') continue;
                 const config = await getBrainConfig(tId);
                 if (config.noAnswerFollowupEnabled) {
-                    activeSenders.push(tId);
+                    activeSenders.push({ tId, config });
                 }
             } catch (err) {
                 console.error(`[NoAnswer-Daemon] Error checking config for ${tId}:`, err.message);
@@ -1396,12 +1407,13 @@ if (crmSupabase) {
 
         const jid = `${sanitizedPhone}@c.us`;
         const firstName = nameStr ? nameStr.trim().split(' ')[0] : '';
-        const greeting = firstName ? `Hey ${firstName}, ` : `Hey! `;
-        const messageText = `${greeting}We tried calling you regarding your Homemade application but it looks like you were not available. Let us know when is a good time to reach you, or if you prefer, we can just chat right here!`;
+        const nameReplacement = firstName ? ', ' + firstName : '';
 
-        for (const senderTenantId of activeSenders) {
-            console.log(`[NoAnswer-Daemon] 📩 Queueing No Answer followup for ${sanitizedPhone} on tenant: ${senderTenantId}`);
-            sessionManager.queueMessage(senderTenantId, jid, messageText);
+        for (const sender of activeSenders) {
+            const template = sender.config.noAnswerFollowupMessage || DEFAULT_CONFIG.noAnswerFollowupMessage;
+            const messageText = template.replace('{Name}', nameReplacement);
+            console.log(`[NoAnswer-Daemon] 📩 Queueing No Answer followup for ${sanitizedPhone} on tenant: ${sender.tId}`);
+            sessionManager.queueMessage(sender.tId, jid, messageText);
         }
     };
 
@@ -1478,7 +1490,7 @@ if (crmSupabase) {
                 if (sessionManager.getStatus(tId) !== 'READY') continue;
                 const config = await getBrainConfig(tId);
                 if (config.cateringNoAnswerFollowupEnabled) {
-                    activeSenders.push(tId);
+                    activeSenders.push({ tId, config });
                 }
             } catch (err) {
                 console.error(`[Catering-NoAnswer-Daemon] Error checking config for ${tId}:`, err.message);
@@ -1496,12 +1508,13 @@ if (crmSupabase) {
 
         const jid = `${sanitizedPhone}@c.us`;
         const firstName = nameStr ? nameStr.trim().split(' ')[0] : '';
-        const greeting = firstName ? `Hey ${firstName}, ` : `Hey! `;
-        const messageText = `${greeting}we tried calling you regarding your catering request but it looks like you were not available. Let us know when is a good time to reach you, or if you prefer, we can just chat right here!`;
+        const nameReplacement = firstName ? ', ' + firstName : '';
 
-        for (const senderTenantId of activeSenders) {
-            console.log(`[Catering-NoAnswer-Daemon] 📩 Queueing Catering No Answer followup for ${sanitizedPhone} on tenant: ${senderTenantId}`);
-            sessionManager.queueMessage(senderTenantId, jid, messageText);
+        for (const sender of activeSenders) {
+            const template = sender.config.cateringNoAnswerFollowupMessage || DEFAULT_CONFIG.cateringNoAnswerFollowupMessage;
+            const messageText = template.replace('{Name}', nameReplacement);
+            console.log(`[Catering-NoAnswer-Daemon] 📩 Queueing Catering No Answer followup for ${sanitizedPhone} on tenant: ${sender.tId}`);
+            sessionManager.queueMessage(sender.tId, jid, messageText);
         }
     };
 
