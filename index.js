@@ -125,6 +125,12 @@ if (crmSupabase) {
     console.log('⚠️ CRM Supabase credentials missing or invalid in .env. (CRM context disabled)');
 }
 
+// Map CRM admin user IDs to WhatsApp tenants
+const ADMIN_TO_TENANT_MAP = {
+    'c50a568a-1566-4fa5-a0a2-2a0f44ffdebd': 'napoleon', // Walid Sabihi
+    'd6ad7fc9-2f7b-4936-8711-79d7f683edee': 'tia',       // Tia Yahya
+};
+
 const AdmZip = require('adm-zip');
 
 async function saveSessionToSupabase(tenantId) {
@@ -1378,18 +1384,31 @@ if (supabase) {
 if (crmSupabase) {
     const notifiedNoAnswers = new Set();
 
-    const dispatchNoAnswerMessage = async (phoneStr, nameStr, recordId) => {
+    const dispatchNoAnswerMessage = async (phoneStr, nameStr, recordId, assignedAdminId = null) => {
         if (!phoneStr || notifiedNoAnswers.has(recordId)) return;
+
+        // Determine target tenant if there is a mapped admin assignment
+        let targetTenantId = null;
+        if (assignedAdminId && ADMIN_TO_TENANT_MAP[assignedAdminId]) {
+            targetTenantId = ADMIN_TO_TENANT_MAP[assignedAdminId];
+        }
 
         // Find which active sessions have noAnswerFollowupEnabled enabled in settings
         const activeSenders = [];
-        const activeSessions = Array.from(sessionManager.sessions.keys());
+        const activeSessions = targetTenantId ? [targetTenantId] : Array.from(sessionManager.sessions.keys());
         for (const tId of activeSessions) {
             try {
-                if (sessionManager.getStatus(tId) !== 'READY') continue;
+                if (sessionManager.getStatus(tId) !== 'READY') {
+                    if (targetTenantId) {
+                        console.warn(`[NoAnswer-Daemon] Mapped tenant ${tId} for admin ${assignedAdminId} is not READY.`);
+                    }
+                    continue;
+                }
                 const config = await getBrainConfig(tId);
                 if (config.noAnswerFollowupEnabled) {
                     activeSenders.push({ tId, config });
+                } else if (targetTenantId) {
+                    console.warn(`[NoAnswer-Daemon] Mapped tenant ${tId} for admin ${assignedAdminId} does not have noAnswerFollowupEnabled enabled.`);
                 }
             } catch (err) {
                 console.error(`[NoAnswer-Daemon] Error checking config for ${tId}:`, err.message);
@@ -1397,7 +1416,7 @@ if (crmSupabase) {
         }
 
         if (activeSenders.length === 0) {
-            console.log(`[NoAnswer-Daemon] Dropping No Answer followup for ${phoneStr} - feature is disabled on all active tenants.`);
+            console.log(`[NoAnswer-Daemon] Dropping No Answer followup for ${phoneStr} - feature is disabled on active target tenant(s).`);
             return;
         }
 
@@ -1433,7 +1452,7 @@ if (crmSupabase) {
                         .single();
 
                     if (data && !error && data.contact_phone) {
-                        await dispatchNoAnswerMessage(data.contact_phone, data.chef_name, payload.new.id);
+                        await dispatchNoAnswerMessage(data.contact_phone, data.chef_name, payload.new.id, payload.new.assigned_admin_id);
                     }
                 }
             })
@@ -1479,18 +1498,31 @@ if (crmSupabase) {
         }
     })();
 
-    const dispatchCateringNoAnswerMessage = async (phoneStr, nameStr, recordId) => {
+    const dispatchCateringNoAnswerMessage = async (phoneStr, nameStr, recordId, assignedAdminId = null) => {
         if (!phoneStr || notifiedCateringNoAnswers.has(recordId)) return;
+
+        // Determine target tenant if there is a mapped admin assignment
+        let targetTenantId = null;
+        if (assignedAdminId && ADMIN_TO_TENANT_MAP[assignedAdminId]) {
+            targetTenantId = ADMIN_TO_TENANT_MAP[assignedAdminId];
+        }
 
         // Find which active sessions have cateringNoAnswerFollowupEnabled enabled in settings
         const activeSenders = [];
-        const activeSessions = Array.from(sessionManager.sessions.keys());
+        const activeSessions = targetTenantId ? [targetTenantId] : Array.from(sessionManager.sessions.keys());
         for (const tId of activeSessions) {
             try {
-                if (sessionManager.getStatus(tId) !== 'READY') continue;
+                if (sessionManager.getStatus(tId) !== 'READY') {
+                    if (targetTenantId) {
+                        console.warn(`[Catering-NoAnswer-Daemon] Mapped tenant ${tId} for admin ${assignedAdminId} is not READY.`);
+                    }
+                    continue;
+                }
                 const config = await getBrainConfig(tId);
                 if (config.cateringNoAnswerFollowupEnabled) {
                     activeSenders.push({ tId, config });
+                } else if (targetTenantId) {
+                    console.warn(`[Catering-NoAnswer-Daemon] Mapped tenant ${tId} for admin ${assignedAdminId} does not have cateringNoAnswerFollowupEnabled enabled.`);
                 }
             } catch (err) {
                 console.error(`[Catering-NoAnswer-Daemon] Error checking config for ${tId}:`, err.message);
@@ -1498,7 +1530,7 @@ if (crmSupabase) {
         }
 
         if (activeSenders.length === 0) {
-            console.log(`[Catering-NoAnswer-Daemon] Dropping Catering No Answer followup for ${phoneStr} - feature is disabled on all active tenants.`);
+            console.log(`[Catering-NoAnswer-Daemon] Dropping Catering No Answer followup for ${phoneStr} - feature is disabled on active target tenant(s).`);
             return;
         }
 
@@ -1525,7 +1557,7 @@ if (crmSupabase) {
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'catering_leads' }, async (payload) => {
                 if (payload.new && payload.new.status === 'no_answer') {
                     console.log(`[Catering-NoAnswer-Daemon] Realtime update caught status 'no_answer' for: ${payload.new.id}`);
-                    await dispatchCateringNoAnswerMessage(payload.new.phone, payload.new.customer_name, payload.new.id);
+                    await dispatchCateringNoAnswerMessage(payload.new.phone, payload.new.customer_name, payload.new.id, payload.new.assigned_admin_id);
                 }
             })
             .subscribe();
@@ -1544,7 +1576,7 @@ if (crmSupabase) {
                     for (const row of data) {
                         if (!notifiedCateringNoAnswers.has(row.id)) {
                             console.log(`[Catering-NoAnswer-Daemon] Polling fallback caught no-response catering lead: ${row.id}`);
-                            await dispatchCateringNoAnswerMessage(row.phone, row.customer_name, row.id);
+                            await dispatchCateringNoAnswerMessage(row.phone, row.customer_name, row.id, row.assigned_admin_id);
                         }
                     }
                 }
