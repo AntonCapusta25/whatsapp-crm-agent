@@ -89,8 +89,27 @@ async function testCanceledOrders() {
 
             const orderUuid = order.order_uuid || '';
             const orderAmount = order.order_amount || 0;
-            const customerEmail = order.meta?.email || order.meta?.customer_email || '';
             const paymentModeName = order.payment_mode_name || order.payment_mode?.name || '';
+
+            // Extract customer details
+            const customerName = order.delivery_address?.contact_name || order.user?.name || 'N/A';
+            const customerPhone = order.delivery_address?.contact_phone_number || order.user?.phone || 'N/A';
+            const customerEmail = order.meta?.email || order.meta?.customer_email || order.user?.email || 'N/A';
+
+            // Extract chef details
+            const chefName = order.pickup_address?.contact_name || 'N/A';
+            const chefPhone = order.pickup_address?.contact_phone_number || 'N/A';
+
+            // Determine who canceled the order
+            const cancelHistory = order.order_status_history?.find(h => h.order_status === 6);
+            let canceledBy = 'Customer / System';
+            if (cancelHistory?.user) {
+                if (cancelHistory.user.roles?.includes('T1003')) {
+                    canceledBy = `Chef (${chefName})`;
+                } else if (cancelHistory.user.roles?.includes('T1002')) {
+                    canceledBy = `Admin (${cancelHistory.user.email || 'Staff'})`;
+                }
+            }
 
             console.log(`\n👉 Processing Order #${orderId} (Amount: €${orderAmount}, Mode: ${paymentModeName})...`);
 
@@ -113,17 +132,61 @@ async function testCanceledOrders() {
 
             console.log(`   DB Record Status:`, existing ? `Exists (initial_sent=${initialEmailSent}, stripe_refunded=${stripeRefunded})` : `Not tracked yet`);
 
-            // Send initial email if new
+            // If new order, verify Stripe first, then send initial email and insert record
             if (!existing) {
+                const stripeKey = process.env.STRIPE_SECRET_KEY;
+                if (stripeKey) {
+                    console.log(`   [Action] Checking Stripe on first run...`);
+                    try {
+                        const stripe = Stripe(stripeKey);
+                        const searchQuery = `metadata['payment_ref_id']:'${orderId}' OR metadata['order_id']:'${orderId}' OR metadata['order_uuid']:'${orderUuid}'`;
+                        const stripeSearchResult = await stripe.paymentIntents.search({ query: searchQuery });
+                        
+                        if (stripeSearchResult.data && stripeSearchResult.data.length > 0) {
+                            const pi = stripeSearchResult.data[0];
+                            stripePaymentIntentId = pi.id;
+                            console.log(`   Stripe PaymentIntent found: ${stripePaymentIntentId}`);
+                            
+                            let charges = [];
+                            if (pi.charges && pi.charges.data) {
+                                charges = pi.charges.data;
+                            } else if (pi.latest_charge) {
+                                const ch = await stripe.charges.retrieve(pi.latest_charge);
+                                charges = [ch];
+                            }
+                            stripeRefunded = charges.some(c => c.refunded || c.amount_refunded > 0);
+                            console.log(`   Refund Status on Stripe:`, stripeRefunded ? `REFUNDED` : `NOT REFUNDED`);
+                        } else {
+                            console.log(`   Stripe PaymentIntent not found.`);
+                        }
+                    } catch (stripeErr) {
+                        console.error(`   ❌ Stripe check error:`, stripeErr.message);
+                    }
+                }
+
                 console.log(`   [Action] Attempting to send initial alert to ${sendgridToEmail}...`);
                 if (sendgridApiKey) {
                     try {
                         const subject = `⚠️ Cancelled Order Alert: Order #${orderId}`;
                         const text = `Order #${orderId} (UUID: ${orderUuid}) has been CANCELLED.\n` +
+                                     `Canceled By: ${canceledBy}\n` +
                                      `Amount: €${orderAmount}\n` +
                                      `Payment Mode: ${paymentModeName}\n` +
                                      `Date: ${new Date().toISOString()}\n\n` +
-                                     `This order is registered as cancelled. We will verify the Stripe refund status.`;
+                                     `--- CUSTOMER DETAILS ---\n` +
+                                     `Name: ${customerName}\n` +
+                                     `Phone: ${customerPhone}\n` +
+                                     `Email: ${customerEmail}\n\n` +
+                                     `--- CHEF DETAILS ---\n` +
+                                     `Name: ${chefName}\n` +
+                                     `Phone: ${chefPhone}\n\n` +
+                                     `--- STRIPE STATUS ---\n` +
+                                     `Stripe Refunded: ${stripeRefunded ? 'YES' : 'NO'}\n` +
+                                     `Payment Intent ID: ${stripePaymentIntentId || 'Not Found'}\n\n` +
+                                     (stripeRefunded 
+                                         ? 'No manual action is required as the refund has already been processed on Stripe.' 
+                                         : 'Action Required: This payment is not yet refunded. A reminder email has been sent to info@homemademeals.net.');
+
                         await sendSendGridEmail({
                             to: sendgridToEmail,
                             from: sendgridFromEmail,
@@ -150,7 +213,8 @@ async function testCanceledOrders() {
                         payment_mode_name: paymentModeName,
                         initial_email_sent: initialEmailSent,
                         refund_reminder_sent: false,
-                        stripe_refunded: false
+                        stripe_refunded: stripeRefunded,
+                        stripe_payment_intent_id: stripePaymentIntentId
                     });
 
                 if (insertErr) {
@@ -159,7 +223,7 @@ async function testCanceledOrders() {
                 }
             }
 
-            // Check Stripe refund status
+            // Only check/update Stripe if it hasn't been verified as refunded yet
             if (!stripeRefunded) {
                 const stripeKey = process.env.STRIPE_SECRET_KEY;
                 if (!stripeKey) {
@@ -195,15 +259,23 @@ async function testCanceledOrders() {
                     console.error(`   ❌ Stripe search error:`, stripeErr.message);
                 }
 
-                // If not refunded and reminder not sent, send reminder email
+                // If Stripe check confirms it's not refunded and we haven't sent the reminder email yet, send it
                 if (!stripeRefunded && !refundReminderSent) {
                     console.log(`   [Action] Attempting to send refund reminder to info@homemademeals.net...`);
                     if (sendgridApiKey) {
                         try {
                             const subject = `🚨 Action Required: Refund Reminder for Order #${orderId}`;
                             const text = `Order #${orderId} (UUID: ${orderUuid}) was CANCELLED but the payment has NOT been refunded on Stripe.\n` +
+                                         `Canceled By: ${canceledBy}\n` +
                                          `Amount: €${orderAmount}\n` +
                                          `Stripe Payment Intent ID: ${stripePaymentIntentId || 'Not Found'}\n\n` +
+                                         `--- CUSTOMER DETAILS ---\n` +
+                                         `Name: ${customerName}\n` +
+                                         `Phone: ${customerPhone}\n` +
+                                         `Email: ${customerEmail}\n\n` +
+                                         `--- CHEF DETAILS ---\n` +
+                                         `Name: ${chefName}\n` +
+                                         `Phone: ${chefPhone}\n\n` +
                                          `Please process this refund manually on the Stripe Dashboard.`;
                             await sendSendGridEmail({
                                 to: 'info@homemademeals.net',
