@@ -2357,8 +2357,8 @@ cron.schedule('0 18 * * *', async () => {
 // Canceled Orders Refund Verification Engine
 // ------------------------------------------------------------------
 async function checkCanceledOrders() {
-    if (!crmSupabase) {
-        console.warn('[Cron-Canceled-Orders] CRM Supabase not connected. Skipping.');
+    if (!supabase) {
+        console.warn('[Cron-Canceled-Orders] Main Supabase not connected. Skipping.');
         return;
     }
 
@@ -2408,7 +2408,7 @@ async function checkCanceledOrders() {
             const paymentModeName = order.payment_mode_name || order.payment_mode?.name || '';
 
             // Query if we already processed this order
-            const { data: existing, error: fetchErr } = await crmSupabase
+            const { data: existing, error: fetchErr } = await supabase
                 .from('processed_canceled_orders')
                 .select('*')
                 .eq('order_id', orderId)
@@ -2448,7 +2448,7 @@ async function checkCanceledOrders() {
                 }
 
                 // Insert into the database tracking table
-                const { error: insertErr } = await crmSupabase
+                const { error: insertErr } = await supabase
                     .from('processed_canceled_orders')
                     .insert({
                         order_id: orderId,
@@ -2523,7 +2523,7 @@ async function checkCanceledOrders() {
                 }
 
                 // Update the DB record with the latest Stripe and reminder status
-                const { error: updateErr } = await crmSupabase
+                const { error: updateErr } = await supabase
                     .from('processed_canceled_orders')
                     .update({
                         stripe_payment_intent_id: stripePaymentIntentId,
