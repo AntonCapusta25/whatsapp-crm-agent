@@ -276,6 +276,10 @@ export default function App() {
   const [campaignMessage, setCampaignMessage] = useState('');
   const [campaignFilter, setCampaignFilter] = useState('all');
   const [isSendingCampaign, setIsSendingCampaign] = useState(false);
+  const [showNewChat, setShowNewChat] = useState(false);
+  const [newChatPhone, setNewChatPhone] = useState('');
+  const [newChatMessage, setNewChatMessage] = useState('');
+  const [isSendingNewChat, setIsSendingNewChat] = useState(false);
 
   const loadCampaignProfiles = async () => {
     try {
@@ -315,6 +319,35 @@ export default function App() {
       alert('Error sending campaign.');
     }
     setIsSendingCampaign(false);
+  };
+
+  const handleSendNewChat = async (e) => {
+    e.preventDefault();
+    if (!newChatPhone.trim() || !newChatMessage.trim()) return;
+
+    setIsSendingNewChat(true);
+    try {
+      const res = await apiFetch(`/api/${tenantId}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: newChatPhone.trim(), message: newChatMessage.trim() })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert('Message queued successfully! It will be sent shortly.');
+        setShowNewChat(false);
+        setNewChatPhone('');
+        setNewChatMessage('');
+        loadChats();
+      } else {
+        alert('Failed to send: ' + (data.error || 'Unknown error'));
+      }
+    } catch (err) {
+      console.error('Error starting new chat:', err);
+      alert('Network error starting new chat.');
+    } finally {
+      setIsSendingNewChat(false);
+    }
   };
 
   const messagesEndRef = useRef(null);
@@ -1092,8 +1125,11 @@ export default function App() {
             )}
           </div>
           
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem', width: '100%' }}>
-            <button onClick={loadChats} style={{ background: 'var(--active-chat)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', padding: '10px 0', color: 'var(--text-main)', fontWeight: 600, textAlign: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.2)' }} title="Force Refresh Chats">Refresh</button>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', width: '100%', marginBottom: '0.5rem' }}>
+            <button onClick={loadChats} style={{ background: 'var(--active-chat)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', padding: '10px 0', color: 'var(--text-main)', fontWeight: 600, textAlign: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.2)' }} title="Force Refresh Chats">Refresh Chats</button>
+            <button onClick={() => setShowNewChat(true)} style={{ background: 'var(--active-chat)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', padding: '10px 0', color: 'var(--text-main)', fontWeight: 600, textAlign: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.2)' }} title="Start New Chat">New Chat</button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', width: '100%' }}>
             <button onClick={() => { setShowCampaigns(true); loadCampaignProfiles(); }} style={{ background: 'var(--active-chat)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', padding: '10px 0', color: 'var(--text-main)', fontWeight: 600, textAlign: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.2)' }} title="Batch Campaign Manager">Campaigns</button>
             <button onClick={() => setShowSettings(true)} style={{ background: 'var(--active-chat)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', padding: '10px 0', color: 'var(--text-main)', fontWeight: 600, textAlign: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.2)' }} title="Agent Brain Settings">Settings</button>
           </div>
@@ -1216,7 +1252,7 @@ export default function App() {
                         fromMe: true,
                         timestamp: Math.floor(Date.now() / 1000)
                       }]);
-                      await apiFetch('/api/send', {
+                      await apiFetch(`/api/${tenantId}/send`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ jid: activeChat.id, message: msgText })
@@ -1913,6 +1949,59 @@ export default function App() {
                   style={{ backgroundColor: 'var(--accent-green)', border: 'none', color: '#ffffff', borderRadius: '6px', padding: '0.5rem 1.5rem', fontSize: '0.9rem', cursor: 'pointer', fontWeight: 600 }}
                 >
                   Save Settings
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* New Chat Modal */}
+      {showNewChat && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, backdropFilter: 'blur(3px)' }}>
+          <div style={{ backgroundColor: 'var(--bg-chat)', border: '1px solid var(--border-color)', borderRadius: '12px', width: '90%', maxWidth: '450px', padding: '2rem', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.04)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem' }}>
+              <h2 style={{ margin: 0, color: 'var(--text-main)', fontSize: '1.25rem' }}>Start New Chat</h2>
+              <button onClick={() => setShowNewChat(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '1.5rem', cursor: 'pointer' }}>×</button>
+            </div>
+            <form onSubmit={handleSendNewChat}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.5rem', fontWeight: 600 }}>Phone Number</label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. +31612345678" 
+                    value={newChatPhone}
+                    onChange={(e) => setNewChatPhone(e.target.value)}
+                    required
+                    style={{ width: '100%', padding: '0.75rem', backgroundColor: 'var(--hover-chat)', border: '1px solid var(--border-color)', color: 'var(--text-main)', borderRadius: '8px', fontSize: '0.9rem', outline: 'none' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.5rem', fontWeight: 600 }}>First Message</label>
+                  <textarea 
+                    placeholder="Type your initial message..." 
+                    value={newChatMessage}
+                    onChange={(e) => setNewChatMessage(e.target.value)}
+                    required
+                    rows={4}
+                    style={{ width: '100%', padding: '0.75rem', backgroundColor: 'var(--hover-chat)', border: '1px solid var(--border-color)', color: 'var(--text-main)', borderRadius: '8px', fontSize: '0.9rem', outline: 'none', resize: 'vertical' }}
+                  />
+                </div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem', marginTop: '1.5rem' }}>
+                <button 
+                  type="button" 
+                  onClick={() => setShowNewChat(false)} 
+                  style={{ backgroundColor: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-main)', borderRadius: '6px', padding: '0.5rem 1.25rem', fontSize: '0.9rem', cursor: 'pointer', fontWeight: 600 }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={isSendingNewChat}
+                  style={{ backgroundColor: 'var(--accent-green)', border: 'none', color: '#ffffff', borderRadius: '6px', padding: '0.5rem 1.5rem', fontSize: '0.9rem', cursor: 'pointer', fontWeight: 600, opacity: isSendingNewChat ? 0.6 : 1 }}
+                >
+                  {isSendingNewChat ? 'Sending...' : 'Send Message'}
                 </button>
               </div>
             </form>
