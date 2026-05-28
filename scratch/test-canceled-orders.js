@@ -13,6 +13,37 @@ if (!supabaseUrl || !supabaseKey) {
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+// Initialize CRM Supabase Client
+const crmSupabaseUrl = process.env.CRM_SUPABASE_URL;
+const crmSupabaseKey = process.env.CRM_SUPABASE_KEY;
+const crmSupabase = (crmSupabaseUrl && crmSupabaseKey) ? createClient(crmSupabaseUrl, crmSupabaseKey) : null;
+
+const ADMIN_TO_TENANT_MAP = {
+    'c50a568a-1566-4fa5-a0a2-2a0f44ffdebd': 'napoleon', // Walid Sabihi
+    'd6ad7fc9-2f7b-4936-8711-79d7f683edee': 'tia',       // Tia Yahya
+};
+
+function sanitizePhone(phone) {
+    if (!phone) return null;
+    let cleaned = String(phone).replace(/\D/g, '');
+    if (cleaned.startsWith('00')) {
+        cleaned = cleaned.substring(2);
+    }
+    if (cleaned.startsWith('310') && cleaned.length >= 10) {
+        cleaned = '31' + cleaned.substring(3);
+    }
+    if (cleaned.startsWith('06') && cleaned.length === 10) {
+        cleaned = '316' + cleaned.substring(2);
+    } 
+    else if (cleaned.startsWith('6') && cleaned.length === 9) {
+        cleaned = '316' + cleaned.substring(1);
+    } 
+    else if (cleaned.startsWith('0') && cleaned.length >= 9) {
+        cleaned = '31' + cleaned.substring(1);
+    }
+    return cleaned;
+}
+
 // 2. Define SendGrid utility
 async function sendSendGridEmail({ to, from, subject, text, apiKey }) {
     if (!apiKey || !to || !from) {
@@ -39,6 +70,8 @@ async function sendSendGridEmail({ to, from, subject, text, apiKey }) {
     }
     console.log(`[Email] SendGrid notification sent successfully to ${to}`);
 }
+
+const BOOT_TIME = 0; // Bypasses boot-time check in testing to allow processing WhatsApp alerts
 
 async function testCanceledOrders() {
     console.log("⚡ [Test] Starting canceled orders checker test...");
@@ -81,7 +114,6 @@ async function testCanceledOrders() {
 
         const sendgridApiKey = process.env.SENDGRID_API_KEY;
         const sendgridFromEmail = process.env.SENDGRID_FROM_EMAIL || 'info@homemademeals.net';
-        const sendgridToEmail = process.env.SENDGRID_TO_EMAIL || 'bangalexf@gmail.com';
 
         for (const order of orders) {
             const orderId = order.order_id;
@@ -126,7 +158,6 @@ async function testCanceledOrders() {
             }
 
             let initialEmailSent = existing ? existing.initial_email_sent : false;
-            let refundReminderSent = existing ? existing.refund_reminder_sent : false;
             let stripeRefunded = existing ? existing.stripe_refunded : false;
             let stripePaymentIntentId = existing ? existing.stripe_payment_intent_id : null;
 
@@ -164,42 +195,92 @@ async function testCanceledOrders() {
                     }
                 }
 
-                console.log(`   [Action] Attempting to send initial alert to ${sendgridToEmail}...`);
+                // Send initial email to BOTH bangalexf@gmail.com and info@homemademeals.net
+                console.log(`   [Action] Attempting to send initial alert to BOTH bangalexf@gmail.com and info@homemademeals.net...`);
                 if (sendgridApiKey) {
-                    try {
-                        const subject = `⚠️ Cancelled Order Alert: Order #${orderId}`;
-                        const text = `Order #${orderId} (UUID: ${orderUuid}) has been CANCELLED.\n` +
-                                     `Canceled By: ${canceledBy}\n` +
-                                     `Amount: €${orderAmount}\n` +
-                                     `Payment Mode: ${paymentModeName}\n` +
-                                     `Date: ${new Date().toISOString()}\n\n` +
-                                     `--- CUSTOMER DETAILS ---\n` +
-                                     `Name: ${customerName}\n` +
-                                     `Phone: ${customerPhone}\n` +
-                                     `Email: ${customerEmail}\n\n` +
-                                     `--- CHEF DETAILS ---\n` +
-                                     `Name: ${chefName}\n` +
-                                     `Phone: ${chefPhone}\n\n` +
-                                     `--- STRIPE STATUS ---\n` +
-                                     `Stripe Refunded: ${stripeRefunded ? 'YES' : 'NO'}\n` +
-                                     `Payment Intent ID: ${stripePaymentIntentId || 'Not Found'}\n\n` +
-                                     (stripeRefunded 
-                                         ? 'No manual action is required as the refund has already been processed on Stripe.' 
-                                         : 'Action Required: This payment is not yet refunded. A reminder email has been sent to info@homemademeals.net.');
+                    const recipients = ['bangalexf@gmail.com', 'info@homemademeals.net'];
+                    for (const recipient of recipients) {
+                        try {
+                            const subject = `⚠️ Cancelled Order Alert: Order #${orderId}`;
+                            const text = `Order #${orderId} (UUID: ${orderUuid}) has been CANCELLED.\n` +
+                                         `Canceled By: ${canceledBy}\n` +
+                                         `Amount: €${orderAmount}\n` +
+                                         `Payment Mode: ${paymentModeName}\n` +
+                                         `Date: ${new Date().toISOString()}\n\n` +
+                                         `--- CUSTOMER DETAILS ---\n` +
+                                         `Name: ${customerName}\n` +
+                                         `Phone: ${customerPhone}\n` +
+                                         `Email: ${customerEmail}\n\n` +
+                                         `--- CHEF DETAILS ---\n` +
+                                         `Name: ${chefName}\n` +
+                                         `Phone: ${chefPhone}\n\n` +
+                                         `--- STRIPE STATUS ---\n` +
+                                         `Stripe Refunded: ${stripeRefunded ? 'YES' : 'NO'}\n` +
+                                         `Payment Intent ID: ${stripePaymentIntentId || 'Not Found'}\n\n` +
+                                         (stripeRefunded 
+                                             ? 'No manual action is required as the refund has already been processed on Stripe.' 
+                                             : 'This payment is not yet refunded. It will be reported in the 3-day batch refund report if it remains unpaid.');
 
-                        await sendSendGridEmail({
-                            to: sendgridToEmail,
-                            from: sendgridFromEmail,
-                            subject: subject,
-                            text: text,
-                            apiKey: sendgridApiKey
-                        });
-                        initialEmailSent = true;
-                    } catch (emailErr) {
-                        console.error(`   ❌ Failed to send initial email:`, emailErr.message);
+                            await sendSendGridEmail({
+                                to: recipient,
+                                from: sendgridFromEmail,
+                                subject: subject,
+                                text: text,
+                                apiKey: sendgridApiKey
+                            });
+                            initialEmailSent = true;
+                        } catch (emailErr) {
+                            console.error(`   ❌ Failed to send initial email to ${recipient}:`, emailErr.message);
+                        }
                     }
                 } else {
                     console.log(`   ⚠️ SENDGRID_API_KEY missing, skipping email dispatch.`);
+                }
+
+                // Send WhatsApp message to customer if canceled after BOOT_TIME
+                const orderUpdatedAtMs = new Date(order.updated_at).getTime();
+                if (orderUpdatedAtMs > BOOT_TIME) {
+                    let whatsappMessageText = '';
+                    if (canceledBy.startsWith('Chef')) {
+                        whatsappMessageText = `Sorry for the inconveniences with your order, the refund is on the way, here is your discount code for the next order: SECONDCHANCE15`;
+                    } else if (canceledBy.startsWith('Customer')) {
+                        whatsappMessageText = `It's quite sad that you canceled the order, please give us some feedback why the order was canceled and how can we become better, here is the code for a next order: SECONDCHANCE15`;
+                    }
+
+                    if (whatsappMessageText && customerPhone) {
+                        const sanitizedCustomerPhone = sanitizePhone(customerPhone);
+                        if (sanitizedCustomerPhone) {
+                            const customerJid = `${sanitizedCustomerPhone}@c.us`;
+                            
+                            // Determine sending tenant session
+                            let targetTenantId = null;
+                            if (crmSupabase && order.merchant_id) {
+                                try {
+                                    const { data: profile } = await crmSupabase
+                                        .from('chef_profiles')
+                                        .select('id')
+                                        .eq('hyperzod_merchant_id', order.merchant_id)
+                                        .maybeSingle();
+                                        
+                                    if (profile?.id) {
+                                        const { data: adminData } = await crmSupabase
+                                            .from('chef_admin_data')
+                                            .select('assigned_admin_id')
+                                            .eq('chef_profile_id', profile.id)
+                                            .maybeSingle();
+                                            
+                                        if (adminData?.assigned_admin_id && ADMIN_TO_TENANT_MAP[adminData.assigned_admin_id]) {
+                                            targetTenantId = ADMIN_TO_TENANT_MAP[adminData.assigned_admin_id];
+                                        }
+                                    }
+                                } catch (e) {
+                                    console.error('   ❌ Error fetching chef/admin mapping for WhatsApp:', e.message);
+                                }
+                            }
+
+                            console.log(`   [Mock-WhatsApp] Would send cancellation msg to customer ${sanitizedCustomerPhone} using tenant ${targetTenantId || '(first available ready)'}:\n   "${whatsappMessageText}"`);
+                        }
+                    }
                 }
 
                 console.log(`   [Action] Inserting tracking record to DB...`);
@@ -259,47 +340,12 @@ async function testCanceledOrders() {
                     console.error(`   ❌ Stripe search error:`, stripeErr.message);
                 }
 
-                // If Stripe check confirms it's not refunded and we haven't sent the reminder email yet, send it
-                if (!stripeRefunded && !refundReminderSent) {
-                    console.log(`   [Action] Attempting to send refund reminder to info@homemademeals.net...`);
-                    if (sendgridApiKey) {
-                        try {
-                            const subject = `🚨 Action Required: Refund Reminder for Order #${orderId}`;
-                            const text = `Order #${orderId} (UUID: ${orderUuid}) was CANCELLED but the payment has NOT been refunded on Stripe.\n` +
-                                         `Canceled By: ${canceledBy}\n` +
-                                         `Amount: €${orderAmount}\n` +
-                                         `Stripe Payment Intent ID: ${stripePaymentIntentId || 'Not Found'}\n\n` +
-                                         `--- CUSTOMER DETAILS ---\n` +
-                                         `Name: ${customerName}\n` +
-                                         `Phone: ${customerPhone}\n` +
-                                         `Email: ${customerEmail}\n\n` +
-                                         `--- CHEF DETAILS ---\n` +
-                                         `Name: ${chefName}\n` +
-                                         `Phone: ${chefPhone}\n\n` +
-                                         `Please process this refund manually on the Stripe Dashboard.`;
-                            await sendSendGridEmail({
-                                to: 'info@homemademeals.net',
-                                from: sendgridFromEmail,
-                                subject: subject,
-                                text: text,
-                                apiKey: sendgridApiKey
-                            });
-                            refundReminderSent = true;
-                        } catch (emailErr) {
-                            console.error(`   ❌ Failed to send refund reminder:`, emailErr.message);
-                        }
-                    } else {
-                        console.log(`   ⚠️ SENDGRID_API_KEY missing, skipping email dispatch.`);
-                    }
-                }
-
-                console.log(`   [Action] Updating DB record with latest checks...`);
+                console.log(`   [Action] Updating DB record with latest Stripe status...`);
                 const { error: updateErr } = await supabase
                     .from('processed_canceled_orders')
                     .update({
                         stripe_payment_intent_id: stripePaymentIntentId,
                         stripe_refunded: stripeRefunded,
-                        refund_reminder_sent: refundReminderSent,
                         updated_at: new Date().toISOString()
                     })
                     .eq('order_id', orderId);
