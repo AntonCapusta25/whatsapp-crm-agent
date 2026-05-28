@@ -2353,6 +2353,202 @@ cron.schedule('0 18 * * *', async () => {
     }
 });
 
+// ------------------------------------------------------------------
+// Canceled Orders Refund Verification Engine
+// ------------------------------------------------------------------
+async function checkCanceledOrders() {
+    if (!crmSupabase) {
+        console.warn('[Cron-Canceled-Orders] CRM Supabase not connected. Skipping.');
+        return;
+    }
+
+    const hzApiKey = process.env.HYPERZOD_API_KEY;
+    const hzTenant = process.env.HYPERZOD_TENANT_ID;
+
+    if (!hzApiKey || !hzTenant) {
+        console.warn('[Cron-Canceled-Orders] Hyperzod credentials missing (HYPERZOD_API_KEY / HYPERZOD_TENANT_ID). Skipping.');
+        return;
+    }
+
+    try {
+        console.log('[Cron-Canceled-Orders] Fetching last 10 canceled orders from Hyperzod...');
+        const response = await fetch('https://api.hyperzod.app/admin/v1/order/list?page=1&per_page=10', {
+            method: 'POST',
+            headers: {
+                'x-api-key': hzApiKey,
+                'x-tenant': hzTenant,
+                'accept': 'application/json',
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+                per_page: 10,
+                order_status: 6
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Hyperzod response status ${response.status}: ${await response.text()}`);
+        }
+
+        const resJson = await response.json();
+        const orders = resJson?.data?.data ?? [];
+        console.log(`[Cron-Canceled-Orders] Fetched ${orders.length} canceled orders from Hyperzod.`);
+
+        const sendgridApiKey = process.env.SENDGRID_API_KEY;
+        const sendgridFromEmail = process.env.SENDGRID_FROM_EMAIL || 'info@homemademeals.net';
+        const sendgridToEmail = process.env.SENDGRID_TO_EMAIL || 'bangalexf@gmail.com';
+
+        for (const order of orders) {
+            const orderId = order.order_id;
+            if (!orderId) continue;
+
+            const orderUuid = order.order_uuid || '';
+            const orderAmount = order.order_amount || 0;
+            const customerEmail = order.meta?.email || order.meta?.customer_email || '';
+            const paymentModeName = order.payment_mode_name || order.payment_mode?.name || '';
+
+            // Query if we already processed this order
+            const { data: existing, error: fetchErr } = await crmSupabase
+                .from('processed_canceled_orders')
+                .select('*')
+                .eq('order_id', orderId)
+                .maybeSingle();
+
+            if (fetchErr) {
+                console.error(`[Cron-Canceled-Orders] Error fetching from processed_canceled_orders for order #${orderId}:`, fetchErr.message);
+                continue;
+            }
+
+            let initialEmailSent = existing ? existing.initial_email_sent : false;
+            let refundReminderSent = existing ? existing.refund_reminder_sent : false;
+            let stripeRefunded = existing ? existing.stripe_refunded : false;
+            let stripePaymentIntentId = existing ? existing.stripe_payment_intent_id : null;
+
+            // If it's a new order record, send the initial notification to bangalexf@gmail.com
+            if (!existing) {
+                if (sendgridApiKey) {
+                    try {
+                        const subject = `⚠️ Cancelled Order Alert: Order #${orderId}`;
+                        const text = `Order #${orderId} (UUID: ${orderUuid}) has been CANCELLED.\n` +
+                                     `Amount: €${orderAmount}\n` +
+                                     `Payment Mode: ${paymentModeName}\n` +
+                                     `Date: ${new Date().toISOString()}\n\n` +
+                                     `This order is registered as cancelled. We will verify the Stripe refund status.`;
+                        await sendSendGridEmail({
+                            to: sendgridToEmail,
+                            from: sendgridFromEmail,
+                            subject: subject,
+                            text: text,
+                            apiKey: sendgridApiKey
+                        });
+                        initialEmailSent = true;
+                    } catch (emailErr) {
+                        console.error(`[Cron-Canceled-Orders] Failed to send initial email to bangalexf@gmail.com for order #${orderId}:`, emailErr.message);
+                    }
+                }
+
+                // Insert into the database tracking table
+                const { error: insertErr } = await crmSupabase
+                    .from('processed_canceled_orders')
+                    .insert({
+                        order_id: orderId,
+                        order_uuid: orderUuid,
+                        customer_email: customerEmail,
+                        order_amount: orderAmount,
+                        payment_mode_name: paymentModeName,
+                        initial_email_sent: initialEmailSent,
+                        refund_reminder_sent: false,
+                        stripe_refunded: false
+                    });
+
+                if (insertErr) {
+                    console.error(`[Cron-Canceled-Orders] Failed to insert order #${orderId} into DB:`, insertErr.message);
+                    continue;
+                }
+            }
+
+            // Only check Stripe if it hasn't been verified as refunded yet
+            if (!stripeRefunded) {
+                const stripeKey = process.env.STRIPE_SECRET_KEY;
+                if (!stripeKey) {
+                    console.warn(`[Cron-Canceled-Orders] STRIPE_SECRET_KEY is missing. Skipping refund check for order #${orderId}.`);
+                    continue;
+                }
+
+                try {
+                    const stripe = require('stripe')(stripeKey);
+                    // Search for Stripe PaymentIntent matching order_id or order_uuid
+                    const searchQuery = `metadata['order_id']:'${orderId}' OR metadata['order_uuid']:'${orderUuid}' OR metadata['orderId']:'${orderId}'`;
+                    const stripeSearchResult = await stripe.paymentIntents.search({ query: searchQuery });
+                    
+                    if (stripeSearchResult.data && stripeSearchResult.data.length > 0) {
+                        const pi = stripeSearchResult.data[0];
+                        stripePaymentIntentId = pi.id;
+                        
+                        let charges = [];
+                        if (pi.charges && pi.charges.data) {
+                            charges = pi.charges.data;
+                        } else if (pi.latest_charge) {
+                            const ch = await stripe.charges.retrieve(pi.latest_charge);
+                            charges = [ch];
+                        }
+                        
+                        stripeRefunded = charges.some(c => c.refunded || c.amount_refunded > 0);
+                    } else {
+                        console.log(`[Cron-Canceled-Orders] Stripe PaymentIntent not found for order #${orderId}`);
+                    }
+                } catch (stripeErr) {
+                    console.error(`[Cron-Canceled-Orders] Stripe search error for order #${orderId}:`, stripeErr.message);
+                }
+
+                // If Stripe check confirms it's not refunded and we haven't sent the reminder email yet, send it
+                if (!stripeRefunded && !refundReminderSent && sendgridApiKey) {
+                    try {
+                        const subject = `🚨 Action Required: Refund Reminder for Order #${orderId}`;
+                        const text = `Order #${orderId} (UUID: ${orderUuid}) was CANCELLED but the payment has NOT been refunded on Stripe.\n` +
+                                     `Amount: €${orderAmount}\n` +
+                                     `Stripe Payment Intent ID: ${stripePaymentIntentId || 'Not Found'}\n\n` +
+                                     `Please process this refund manually on the Stripe Dashboard.`;
+                        await sendSendGridEmail({
+                            to: 'info@homemademeals.net',
+                            from: sendgridFromEmail,
+                            subject: subject,
+                            text: text,
+                            apiKey: sendgridApiKey
+                        });
+                        refundReminderSent = true;
+                    } catch (emailErr) {
+                        console.error(`[Cron-Canceled-Orders] Failed to send refund reminder to info@homemademeals.net for order #${orderId}:`, emailErr.message);
+                    }
+                }
+
+                // Update the DB record with the latest Stripe and reminder status
+                const { error: updateErr } = await crmSupabase
+                    .from('processed_canceled_orders')
+                    .update({
+                        stripe_payment_intent_id: stripePaymentIntentId,
+                        stripe_refunded: stripeRefunded,
+                        refund_reminder_sent: refundReminderSent,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('order_id', orderId);
+
+                if (updateErr) {
+                    console.error(`[Cron-Canceled-Orders] Failed to update order #${orderId} in DB:`, updateErr.message);
+                }
+            }
+        }
+    } catch (err) {
+        console.error('[Cron-Canceled-Orders] Execution exception:', err.message);
+    }
+}
+
+// Schedule canceled orders refund checker to run every 15 minutes
+cron.schedule('*/15 * * * *', async () => {
+    console.log('[Cron] Initiating canceled orders refund checker...');
+    await checkCanceledOrders();
+});
+
 // Start Express Server
 app.listen(PORT, () => {
     console.log(`\n==================================================================`);
