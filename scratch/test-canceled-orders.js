@@ -242,9 +242,18 @@ async function testCanceledOrders() {
                 if (orderUpdatedAtMs > BOOT_TIME) {
                     let whatsappMessageText = '';
                     if (canceledBy.startsWith('Chef')) {
-                        whatsappMessageText = `Sorry for the inconveniences with your order, the refund is on the way, here is your discount code for the next order: SECONDCHANCE15`;
+                        whatsappMessageText = `Hey! Homemade meals team here. 🧑‍🍳\n\n` +
+                                              `We are really sorry, but the chef had to cancel your order. We know this is disappointing and apologize for the inconvenience! 🥺\n\n` +
+                                              `Your refund is on the way. 💳\n\n` +
+                                              `Here is a discount code for your next order:\n` +
+                                              `👉 *SECONDCHANCE15*\n\n` +
+                                              `We hope to cook for you again soon! 💚`;
                     } else if (canceledBy.startsWith('Customer')) {
-                        whatsappMessageText = `It's quite sad that you canceled the order, please give us some feedback why the order was canceled and how can we become better, here is the code for a next order: SECONDCHANCE15`;
+                        whatsappMessageText = `Hi! Homemade meals team here. 💚\n\n` +
+                                              `It is quite sad that you canceled the order. We understand plans change, but we would love to learn how we can improve! Please let us know why the order was canceled so we can do better next time. 🙏\n\n` +
+                                              `Here is a discount code for your next order:\n` +
+                                              `👉 *SECONDCHANCE15*\n\n` +
+                                              `We hope to see you back soon! 🧑‍🍳`;
                     }
 
                     if (whatsappMessageText && customerPhone) {
