@@ -170,7 +170,7 @@ async function testCanceledOrders() {
                 console.log(`   [Action] Checking Stripe for PaymentIntent...`);
                 try {
                     const stripe = Stripe(stripeKey);
-                    const searchQuery = `metadata['order_id']:'${orderId}' OR metadata['order_uuid']:'${orderUuid}' OR metadata['orderId']:'${orderId}'`;
+                    const searchQuery = `metadata['payment_ref_id']:'${orderId}' OR metadata['order_id']:'${orderId}' OR metadata['order_uuid']:'${orderUuid}'`;
                     const stripeSearchResult = await stripe.paymentIntents.search({ query: searchQuery });
                     
                     if (stripeSearchResult.data && stripeSearchResult.data.length > 0) {

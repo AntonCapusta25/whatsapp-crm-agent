@@ -2485,8 +2485,8 @@ async function checkCanceledOrders() {
 
                 try {
                     const stripe = require('stripe')(stripeKey);
-                    // Search for Stripe PaymentIntent matching order_id or order_uuid
-                    const searchQuery = `metadata['order_id']:'${orderId}' OR metadata['order_uuid']:'${orderUuid}' OR metadata['orderId']:'${orderId}'`;
+                    // Search for Stripe PaymentIntent matching payment_ref_id, order_id or order_uuid
+                    const searchQuery = `metadata['payment_ref_id']:'${orderId}' OR metadata['order_id']:'${orderId}' OR metadata['order_uuid']:'${orderUuid}'`;
                     const stripeSearchResult = await stripe.paymentIntents.search({ query: searchQuery });
                     
                     if (stripeSearchResult.data && stripeSearchResult.data.length > 0) {
