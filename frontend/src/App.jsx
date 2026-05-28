@@ -1749,8 +1749,73 @@ export default function App() {
                 )}
               </div>
 
+              {/* Order Cancellation Alerts */}
+              <div style={{ marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1.2rem' }}>
+                <h3 style={{ fontSize: '1rem', color: 'var(--accent-blue)', marginBottom: '0.4rem' }}>🛒 Order Cancellation Alerts</h3>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem', marginBottom: '0.3rem' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={brainConfig.orderCancellationEnabled !== undefined ? brainConfig.orderCancellationEnabled : true}
+                    onChange={(e) => setBrainConfig({
+                      ...brainConfig,
+                      orderCancellationEnabled: e.target.checked
+                    })}
+                  />
+                  <span>Send WhatsApp notification when order is canceled</span>
+                </label>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginLeft: '1.5rem' }}>
+                  When checked, customers receive a message explaining the refund and providing a promo code.
+                </span>
+                {(brainConfig.orderCancellationEnabled !== undefined ? brainConfig.orderCancellationEnabled : true) && (
+                  <div style={{ marginLeft: '1.5rem', marginTop: '0.8rem', display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
+                    <div>
+                      <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Sender WhatsApp Account</label>
+                      <select
+                        style={{ backgroundColor: 'var(--hover-chat)', border: '1px solid var(--border-color)', color: 'var(--text-main)', borderRadius: '6px', padding: '0.4rem 0.5rem', width: '100%', fontSize: '0.9rem' }}
+                        value={brainConfig.orderCancellationSenderTenant || 'assigned'}
+                        onChange={(e) => setBrainConfig({
+                          ...brainConfig,
+                          orderCancellationSenderTenant: e.target.value
+                        })}
+                      >
+                        <option value="assigned">Route Dynamically by Chef's Assigned Admin</option>
+                        {tenantsList.map(t => (
+                          <option key={t.id} value={t.id}>{t.name} ({t.id})</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Chef Cancellation Message Template</label>
+                      <textarea 
+                        className="chat-input"
+                        style={{ backgroundColor: 'var(--hover-chat)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.6rem', width: '100%', fontSize: '0.85rem', minHeight: '120px', resize: 'vertical' }}
+                        value={brainConfig.orderCancellationChefTemplate || ''}
+                        onChange={(e) => setBrainConfig({ ...brainConfig, orderCancellationChefTemplate: e.target.value })}
+                        placeholder="Enter message template..."
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Customer Cancellation Message Template</label>
+                      <textarea 
+                        className="chat-input"
+                        style={{ backgroundColor: 'var(--hover-chat)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.6rem', width: '100%', fontSize: '0.85rem', minHeight: '120px', resize: 'vertical' }}
+                        value={brainConfig.orderCancellationCustomerTemplate || ''}
+                        onChange={(e) => setBrainConfig({ ...brainConfig, orderCancellationCustomerTemplate: e.target.value })}
+                        placeholder="Enter message template..."
+                      />
+                    </div>
+                    
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', borderLeft: '2px solid var(--accent-blue)', paddingLeft: '0.5rem' }}>
+                      <strong>Placeholders:</strong> <code>{`{CustomerName}`}</code>, <code>{`{ChefName}`}</code>, <code>{`{OrderId}`}</code>, <code>{`{OrderAmount}`}</code>.
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* SendGrid Email Alerts */}
-              <div style={{ marginBottom: '1.5rem' }}>
+              <div style={{ marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1.2rem' }}>
                 <h3 style={{ fontSize: '1rem', color: 'var(--accent-blue)', marginBottom: '0.5rem' }}>SendGrid Email Alerts</h3>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem', marginBottom: '0.5rem' }}>
                   <input 

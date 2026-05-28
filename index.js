@@ -289,6 +289,10 @@ const DEFAULT_CONFIG = {
     noAnswerFollowupMessage: "Hey{Name}, we tried calling you regarding your Homemade application but it looks like you were not available. Let us know when is a good time to reach you, or if you prefer, we can just chat right here!",
     cateringNoAnswerFollowupEnabled: false,
     cateringNoAnswerFollowupMessage: "Hey{Name}, we tried calling you regarding your catering request but it looks like you were not available. Let us know when is a good time to reach you, or if you prefer, we can just chat right here!",
+    orderCancellationEnabled: true,
+    orderCancellationSenderTenant: "assigned",
+    orderCancellationChefTemplate: "Hey! Homemade meals team here. 🧑‍🍳\n\nWe are really sorry, but the chef had to cancel your order. We know this is disappointing and apologize for the inconvenience! 🥺\n\nYour refund is on the way. 💳\n\nHere is a discount code for your next order:\n👉 *SECONDCHANCE15*\n\nWe hope to cook for you again soon! 💚",
+    orderCancellationCustomerTemplate: "Hi! Homemade meals team here. 💚\n\nIt is quite sad that you canceled the order. We understand plans change, but we would love to learn how we can improve! Please let us know why the order was canceled so we can do better next time. 🙏\n\nHere is a discount code for your next order:\n👉 *SECONDCHANCE15*\n\nWe hope to see you back soon! 🧑‍🍳",
     welcomeMessage: {
         enabled: false,
         template: "Hello! Thank you for reaching out. How can I help you today? 🤖"
@@ -358,6 +362,10 @@ async function getBrainConfig(tenantId) {
                     noAnswerFollowupMessage: loaded.noAnswerFollowupMessage || DEFAULT_CONFIG.noAnswerFollowupMessage,
                     cateringNoAnswerFollowupEnabled: loaded.cateringNoAnswerFollowupEnabled || false,
                     cateringNoAnswerFollowupMessage: loaded.cateringNoAnswerFollowupMessage || DEFAULT_CONFIG.cateringNoAnswerFollowupMessage,
+                    orderCancellationEnabled: loaded.orderCancellationEnabled !== undefined ? loaded.orderCancellationEnabled : DEFAULT_CONFIG.orderCancellationEnabled,
+                    orderCancellationSenderTenant: loaded.orderCancellationSenderTenant || DEFAULT_CONFIG.orderCancellationSenderTenant,
+                    orderCancellationChefTemplate: loaded.orderCancellationChefTemplate || DEFAULT_CONFIG.orderCancellationChefTemplate,
+                    orderCancellationCustomerTemplate: loaded.orderCancellationCustomerTemplate || DEFAULT_CONFIG.orderCancellationCustomerTemplate,
                     welcomeMessage: { ...DEFAULT_CONFIG.welcomeMessage, ...loaded.welcomeMessage },
                     autoReply: { ...DEFAULT_CONFIG.autoReply, ...loaded.autoReply },
                     aiAgent: { ...DEFAULT_CONFIG.aiAgent, ...loaded.aiAgent },
@@ -387,6 +395,10 @@ async function getBrainConfig(tenantId) {
                 noAnswerFollowupMessage: loaded.noAnswerFollowupMessage || DEFAULT_CONFIG.noAnswerFollowupMessage,
                 cateringNoAnswerFollowupEnabled: loaded.cateringNoAnswerFollowupEnabled || false,
                 cateringNoAnswerFollowupMessage: loaded.cateringNoAnswerFollowupMessage || DEFAULT_CONFIG.cateringNoAnswerFollowupMessage,
+                orderCancellationEnabled: loaded.orderCancellationEnabled !== undefined ? loaded.orderCancellationEnabled : DEFAULT_CONFIG.orderCancellationEnabled,
+                orderCancellationSenderTenant: loaded.orderCancellationSenderTenant || DEFAULT_CONFIG.orderCancellationSenderTenant,
+                orderCancellationChefTemplate: loaded.orderCancellationChefTemplate || DEFAULT_CONFIG.orderCancellationChefTemplate,
+                orderCancellationCustomerTemplate: loaded.orderCancellationCustomerTemplate || DEFAULT_CONFIG.orderCancellationCustomerTemplate,
                 welcomeMessage: { ...DEFAULT_CONFIG.welcomeMessage, ...loaded.welcomeMessage },
                 autoReply: { ...DEFAULT_CONFIG.autoReply, ...loaded.autoReply },
                 aiAgent: { ...DEFAULT_CONFIG.aiAgent, ...loaded.aiAgent },
@@ -457,6 +469,15 @@ function sanitizePhone(phone) {
         cleaned = '31' + cleaned.substring(1);
     }
     return cleaned;
+}
+
+function formatTemplate(template, vars) {
+    if (!template) return '';
+    let text = template;
+    for (const [key, val] of Object.entries(vars)) {
+        text = text.replace(new RegExp(`{${key}}`, 'g'), val || '');
+    }
+    return text;
 }
 
 // ------------------------------------------------------------------
@@ -2519,68 +2540,80 @@ async function checkCanceledOrders() {
                 // Send WhatsApp message to customer if canceled after BOOT_TIME
                 const orderUpdatedAtMs = new Date(order.updated_at).getTime();
                 if (orderUpdatedAtMs > BOOT_TIME) {
-                    let whatsappMessageText = '';
-                    if (canceledBy.startsWith('Chef')) {
-                        whatsappMessageText = `Hey! Homemade meals team here. 🧑‍🍳\n\n` +
-                                              `We are really sorry, but the chef had to cancel your order. We know this is disappointing and apologize for the inconvenience! 🥺\n\n` +
-                                              `Your refund is on the way. 💳\n\n` +
-                                              `Here is a discount code for your next order:\n` +
-                                              `👉 *SECONDCHANCE15*\n\n` +
-                                              `We hope to cook for you again soon! 💚`;
-                    } else if (canceledBy.startsWith('Customer')) {
-                        whatsappMessageText = `Hi! Homemade meals team here. 💚\n\n` +
-                                              `It is quite sad that you canceled the order. We understand plans change, but we would love to learn how we can improve! Please let us know why the order was canceled so we can do better next time. 🙏\n\n` +
-                                              `Here is a discount code for your next order:\n` +
-                                              `👉 *SECONDCHANCE15*\n\n` +
-                                              `We hope to see you back soon! 🧑‍🍳`;
+                    // Determine Chef's assigned admin tenant ID first
+                    let chefTenantId = null;
+                    if (crmSupabase && order.merchant_id) {
+                        try {
+                            const { data: profile } = await crmSupabase
+                                .from('chef_profiles')
+                                .select('id')
+                                .eq('hyperzod_merchant_id', order.merchant_id)
+                                .maybeSingle();
+                                
+                            if (profile?.id) {
+                                const { data: adminData } = await crmSupabase
+                                    .from('chef_admin_data')
+                                    .select('assigned_admin_id')
+                                    .eq('chef_profile_id', profile.id)
+                                    .maybeSingle();
+                                    
+                                if (adminData?.assigned_admin_id && ADMIN_TO_TENANT_MAP[adminData.assigned_admin_id]) {
+                                    chefTenantId = ADMIN_TO_TENANT_MAP[adminData.assigned_admin_id];
+                                }
+                            }
+                        } catch (e) {
+                            console.error('[Cron-Canceled-Orders] Error fetching chef/admin mapping for WhatsApp config:', e.message);
+                        }
                     }
 
-                    if (whatsappMessageText && customerPhone) {
-                        const sanitizedCustomerPhone = sanitizePhone(customerPhone);
-                        if (sanitizedCustomerPhone) {
-                            const customerJid = `${sanitizedCustomerPhone}@c.us`;
-                            
-                            // Determine sending tenant session
-                            let targetTenantId = null;
-                            if (crmSupabase && order.merchant_id) {
-                                try {
-                                    const { data: profile } = await crmSupabase
-                                        .from('chef_profiles')
-                                        .select('id')
-                                        .eq('hyperzod_merchant_id', order.merchant_id)
-                                        .maybeSingle();
-                                        
-                                    if (profile?.id) {
-                                        const { data: adminData } = await crmSupabase
-                                            .from('chef_admin_data')
-                                            .select('assigned_admin_id')
-                                            .eq('chef_profile_id', profile.id)
-                                            .maybeSingle();
-                                            
-                                        if (adminData?.assigned_admin_id && ADMIN_TO_TENANT_MAP[adminData.assigned_admin_id]) {
-                                            targetTenantId = ADMIN_TO_TENANT_MAP[adminData.assigned_admin_id];
-                                        }
+                    // Fallback configuration tenant if chef has no mapping
+                    const configTenantId = chefTenantId || 'tia';
+                    const config = await getBrainConfig(configTenantId);
+
+                    if (config.orderCancellationEnabled) {
+                        let template = '';
+                        if (canceledBy.startsWith('Chef')) {
+                            template = config.orderCancellationChefTemplate || DEFAULT_CONFIG.orderCancellationChefTemplate;
+                        } else if (canceledBy.startsWith('Customer')) {
+                            template = config.orderCancellationCustomerTemplate || DEFAULT_CONFIG.orderCancellationCustomerTemplate;
+                        }
+
+                        if (template && customerPhone) {
+                            const sanitizedCustomerPhone = sanitizePhone(customerPhone);
+                            if (sanitizedCustomerPhone) {
+                                const customerJid = `${sanitizedCustomerPhone}@c.us`;
+                                
+                                // Resolve target sender tenant
+                                let targetTenantId = chefTenantId; // Start with Chef's assigned tenant
+                                if (config.orderCancellationSenderTenant && config.orderCancellationSenderTenant !== 'assigned') {
+                                    targetTenantId = config.orderCancellationSenderTenant;
+                                }
+
+                                // Fallback to first available ready tenant if target tenant is not ready/found
+                                if (!targetTenantId || sessionManager.getStatus(targetTenantId) !== 'READY') {
+                                    const readySessions = Array.from(sessionManager.sessions.keys()).filter(t => sessionManager.getStatus(t) === 'READY');
+                                    if (readySessions.length > 0) {
+                                        targetTenantId = readySessions[0];
                                     }
-                                } catch (e) {
-                                    console.error('[Cron-Canceled-Orders] Error fetching chef/admin mapping for WhatsApp:', e.message);
                                 }
-                            }
 
-                            // Fallback to first available ready tenant if mapped tenant not ready/found
-                            if (!targetTenantId || sessionManager.getStatus(targetTenantId) !== 'READY') {
-                                const readySessions = Array.from(sessionManager.sessions.keys()).filter(t => sessionManager.getStatus(t) === 'READY');
-                                if (readySessions.length > 0) {
-                                    targetTenantId = readySessions[0];
+                                if (targetTenantId) {
+                                    const whatsappMessageText = formatTemplate(template, {
+                                        CustomerName: customerName,
+                                        ChefName: chefName,
+                                        OrderId: orderId,
+                                        OrderAmount: orderAmount
+                                    });
+
+                                    console.log(`[Cron-Canceled-Orders] Queueing WhatsApp cancellation msg for customer ${sanitizedCustomerPhone} using tenant ${targetTenantId}`);
+                                    sessionManager.queueMessage(targetTenantId, customerJid, whatsappMessageText);
+                                } else {
+                                    console.warn('[Cron-Canceled-Orders] No active ready WhatsApp session to send cancellation msg.');
                                 }
-                            }
-
-                            if (targetTenantId) {
-                                console.log(`[Cron-Canceled-Orders] Queueing WhatsApp cancellation msg for customer ${sanitizedCustomerPhone} using tenant ${targetTenantId}`);
-                                sessionManager.queueMessage(targetTenantId, customerJid, whatsappMessageText);
-                            } else {
-                                console.warn('[Cron-Canceled-Orders] No active ready WhatsApp session to send cancellation msg.');
                             }
                         }
+                    } else {
+                        console.log(`[Cron-Canceled-Orders] WhatsApp cancellation messages are disabled via settings for tenant ${configTenantId}.`);
                     }
                 }
 
