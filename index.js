@@ -2371,8 +2371,8 @@ async function checkCanceledOrders() {
     }
 
     try {
-        console.log('[Cron-Canceled-Orders] Fetching last 10 canceled orders from Hyperzod...');
-        const response = await fetch('https://api.hyperzod.app/admin/v1/order/list?page=1&per_page=10', {
+        console.log('[Cron-Canceled-Orders] Fetching last 50 orders from Hyperzod...');
+        const response = await fetch('https://api.hyperzod.app/admin/v1/order/list?page=1&per_page=50', {
             method: 'POST',
             headers: {
                 'x-api-key': hzApiKey,
@@ -2381,8 +2381,7 @@ async function checkCanceledOrders() {
                 'content-type': 'application/json'
             },
             body: JSON.stringify({
-                per_page: 10,
-                order_status: 6
+                per_page: 50
             })
         });
 
@@ -2391,8 +2390,17 @@ async function checkCanceledOrders() {
         }
 
         const resJson = await response.json();
-        const orders = resJson?.data?.data ?? [];
-        console.log(`[Cron-Canceled-Orders] Fetched ${orders.length} canceled orders from Hyperzod.`);
+        const allOrders = resJson?.data?.data ?? [];
+        
+        // Filter in memory for canceled orders (status 6) updated in the last 30 minutes
+        const thirtyMinutesAgo = Date.now() - 30 * 60 * 1000;
+        const orders = allOrders.filter(o => {
+            if (o.order_status !== 6) return false;
+            const updatedAt = new Date(o.updated_at).getTime();
+            return updatedAt >= thirtyMinutesAgo;
+        });
+
+        console.log(`[Cron-Canceled-Orders] Fetched ${allOrders.length} orders; found ${orders.length} canceled in the last 30 minutes.`);
 
         const sendgridApiKey = process.env.SENDGRID_API_KEY;
         const sendgridFromEmail = process.env.SENDGRID_FROM_EMAIL || 'info@homemademeals.net';
