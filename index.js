@@ -923,6 +923,7 @@ class SessionManager {
             puppeteer: {
                 headless: true,
                 executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+                protocolTimeout: 120000,
                 args: [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
