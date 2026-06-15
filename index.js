@@ -1407,6 +1407,35 @@ if (supabase) {
 if (crmSupabase) {
     const notifiedNoAnswers = new Set();
 
+    // 1. Pre-populate already existing 'no_answer' records at startup so we don't spam historical records on boot
+    (async () => {
+        try {
+            // Pre-populate chef_admin_data
+            const { data: cadData, error: cadErr } = await crmSupabase
+                .from('chef_admin_data')
+                .select('id')
+                .eq('admin_status', 'no_answer')
+                .limit(500);
+            if (cadData && !cadErr) {
+                cadData.forEach(row => notifiedNoAnswers.add(row.id));
+                console.log(`[NoAnswer-Daemon] Pre-populated ${cadData.length} existing no_answer chef_admin_data to ignore.`);
+            }
+
+            // Pre-populate old_leads
+            const { data: olData, error: olErr } = await crmSupabase
+                .from('old_leads')
+                .select('id')
+                .eq('status', 'no_answer')
+                .limit(500);
+            if (olData && !olErr) {
+                olData.forEach(row => notifiedNoAnswers.add(row.id));
+                console.log(`[NoAnswer-Daemon] Pre-populated ${olData.length} existing no_answer old_leads to ignore.`);
+            }
+        } catch (err) {
+            console.error('[NoAnswer-Daemon] Startup pre-populate error:', err.message);
+        }
+    })();
+
     const dispatchNoAnswerMessage = async (phoneStr, nameStr, recordId, assignedAdminId = null) => {
         if (!phoneStr || notifiedNoAnswers.has(recordId)) return;
 
@@ -1491,7 +1520,60 @@ if (crmSupabase) {
             })
             .subscribe();
 
-        console.log(`[NoAnswer-Daemon] Subscribed to Realtime UPDATE events for 'no_answer' triggers.`);
+        // 3. Robust polling fallback engine (runs every 30 seconds checking updates in the last 5 minutes)
+        setInterval(async () => {
+            try {
+                const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+                
+                // A. Check chef_admin_data updates
+                const { data: cadUpdates, error: cadErr } = await crmSupabase
+                    .from('chef_admin_data')
+                    .select('*')
+                    .eq('admin_status', 'no_answer')
+                    .gte('updated_at', fiveMinutesAgo);
+
+                if (cadUpdates && !cadErr) {
+                    for (const row of cadUpdates) {
+                        if (!notifiedNoAnswers.has(row.id)) {
+                            console.log(`[NoAnswer-Daemon] Polling fallback caught no-response chef: ${row.id}`);
+                            const chefId = row.chef_profile_id;
+                            if (chefId) {
+                                const { data: chef, error: chefErr } = await crmSupabase
+                                    .from('chef_profiles')
+                                    .select('contact_phone, chef_name')
+                                    .eq('id', chefId)
+                                    .single();
+
+                                if (chef && !chefErr && chef.contact_phone) {
+                                    await dispatchNoAnswerMessage(chef.contact_phone, chef.chef_name, row.id, row.assigned_admin_id);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // B. Check old_leads updates
+                const { data: olUpdates, error: olErr } = await crmSupabase
+                    .from('old_leads')
+                    .select('*')
+                    .eq('status', 'no_answer')
+                    .gte('updated_at', fiveMinutesAgo);
+
+                if (olUpdates && !olErr) {
+                    for (const row of olUpdates) {
+                        if (!notifiedNoAnswers.has(row.id)) {
+                            console.log(`[NoAnswer-Daemon] Polling fallback caught no-response old_lead: ${row.id}`);
+                            await dispatchNoAnswerMessage(row.phone, row.name, row.id);
+                        }
+                    }
+                }
+
+            } catch (pollErr) {
+                console.error('[NoAnswer-Daemon] Polling fallback exception:', pollErr.message);
+            }
+        }, 30000);
+
+        console.log(`[NoAnswer-Daemon] Subscribed to Realtime UPDATE events and Polling fallback for 'no_answer' triggers.`);
     } catch (err) {
         console.error('[NoAnswer-Daemon] Subscription error:', err.message);
     }
