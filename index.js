@@ -1056,7 +1056,9 @@ class SessionManager {
                     direction: 'INCOMING',
                     message_body: msg.body,
                     is_important: isImportant
-                }).catch(err => console.error('[History] INCOMING Insert failed:', err.message));
+                }).then(({ error }) => {
+                    if (error) console.error('[History] INCOMING Insert failed:', error.message);
+                });
             }
 
             // 3. Welcome Message Auto-Reply Trigger
@@ -1153,7 +1155,9 @@ class SessionManager {
                         direction: 'OUTGOING',
                         message_body: msg.body,
                         is_important: false
-                    }).catch(err => console.error('[History] OUTGOING Insert failed:', err.message));
+                    }).then(({ error }) => {
+                        if (error) console.error('[History] OUTGOING Insert failed:', error.message);
+                    });
                 }
             }
         });
