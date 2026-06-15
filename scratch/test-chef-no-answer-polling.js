@@ -71,11 +71,11 @@ async function runTest() {
         console.log(`⚠️ Contact phone was null. Mocking phone to: ${contactPhone}`);
     }
 
-    // 3. Update status to 'no_answer' to simulate an admin updating it
-    console.log(`✏️ Updating admin_status of ${testId} to 'no_answer'...`);
+    // 3. Update status to 'called_no_answer' to simulate an admin updating it
+    console.log(`✏️ Updating admin_status of ${testId} to 'called_no_answer'...`);
     const { error: updateErr } = await crmSupabase
         .from('chef_admin_data')
-        .update({ admin_status: 'no_answer' })
+        .update({ admin_status: 'called_no_answer' })
         .eq('id', testId);
 
     if (updateErr) {
@@ -90,13 +90,13 @@ async function runTest() {
     const { data: results, error: pollErr } = await crmSupabase
         .from('chef_admin_data')
         .select('*')
-        .eq('admin_status', 'no_answer')
+        .eq('admin_status', 'called_no_answer')
         .gte('updated_at', fiveMinutesAgo);
 
     if (pollErr) {
         console.error("❌ Polling query failed:", pollErr.message);
     } else {
-        console.log(`📊 Polling query found ${results.length} records updated to 'no_answer' in the last 5 minutes.`);
+        console.log(`📊 Polling query found ${results.length} records updated to 'called_no_answer' in the last 5 minutes.`);
         const matched = results.find(r => r.id === testId);
         
         if (matched) {

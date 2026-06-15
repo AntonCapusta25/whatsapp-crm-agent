@@ -1414,11 +1414,11 @@ if (crmSupabase) {
             const { data: cadData, error: cadErr } = await crmSupabase
                 .from('chef_admin_data')
                 .select('id')
-                .eq('admin_status', 'no_answer')
+                .eq('admin_status', 'called_no_answer')
                 .limit(500);
             if (cadData && !cadErr) {
                 cadData.forEach(row => notifiedNoAnswers.add(row.id));
-                console.log(`[NoAnswer-Daemon] Pre-populated ${cadData.length} existing no_answer chef_admin_data to ignore.`);
+                console.log(`[NoAnswer-Daemon] Pre-populated ${cadData.length} existing called_no_answer chef_admin_data to ignore.`);
             }
 
             // Pre-populate old_leads
@@ -1493,7 +1493,7 @@ if (crmSupabase) {
         crmSupabase
             .channel('public:chef_admin_data')
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'chef_admin_data' }, async (payload) => {
-                if (payload.new && payload.new.admin_status === 'no_answer') {
+                if (payload.new && payload.new.admin_status === 'called_no_answer') {
                     const chefId = payload.new.chef_profile_id;
                     if (!chefId) return;
 
@@ -1529,7 +1529,7 @@ if (crmSupabase) {
                 const { data: cadUpdates, error: cadErr } = await crmSupabase
                     .from('chef_admin_data')
                     .select('*')
-                    .eq('admin_status', 'no_answer')
+                    .eq('admin_status', 'called_no_answer')
                     .gte('updated_at', fiveMinutesAgo);
 
                 if (cadUpdates && !cadErr) {
