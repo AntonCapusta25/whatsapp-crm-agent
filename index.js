@@ -1920,16 +1920,18 @@ async function autoStartAllTenants() {
 
     console.log(`[Startup] 🚀 Auto-booting all known tenants: [${Array.from(tenants).join(', ')}]`);
 
-    // Initialize sessions sequentially to prevent overloading CPU/Puppeteer on cold boots
+    // Initialize sessions sequentially to prevent overloading CPU/memory on cold boots
+    // IMPORTANT: We await each session to fully initialize before starting the next one
     for (const tenantId of tenants) {
         try {
             console.log(`[Startup] ⏳ Booting tenant session: ${tenantId}`);
-            sessionManager.initializeSession(tenantId);
-            // Small delay between starts to prevent race conditions during Chromium launches
-            await new Promise(resolve => setTimeout(resolve, 5000));
+            await sessionManager.initializeSession(tenantId);
         } catch (err) {
             console.error(`[Startup] Failed to boot tenant session for ${tenantId}:`, err.message);
         }
+        // Wait 10s between tenant boots to let Chromium settle and free up memory
+        console.log(`[Startup] ⏸️ Waiting 10s before next tenant boot...`);
+        await new Promise(resolve => setTimeout(resolve, 10000));
     }
     console.log(`[Startup] ✅ Finished auto-booting all tenant sessions.`);
 }

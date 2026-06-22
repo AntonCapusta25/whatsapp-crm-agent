@@ -27,8 +27,8 @@ RUN mkdir -p /app/.wwebjs_auth /app/backups
 # Ensure the correct permissions on the working directory
 RUN chown -R pptruser:pptruser /app
 
-# Switch back to pptruser for security
-USER pptruser
+# Stay as root to avoid EACCES issues with Docker named volumes
+# (auth_data volume may have been created by root in previous containers)
 
 # Expose server port
 EXPOSE 3005
