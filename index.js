@@ -231,16 +231,19 @@ async function restoreSessionFromSupabase(tenantId) {
     if (!supabase) return false;
     const sessionDir = path.join(__dirname, `.wwebjs_auth/session-tenant-${tenantId}`);
 
-    // Only skip restore if the folder has actual WhatsApp auth data inside (Default/Cookies or similar)
+    // Only skip restore if the folder has actual WhatsApp auth data inside
+    // We check for critical files that WhatsApp Web.js actually needs: Cookies and Local Storage
     if (fs.existsSync(sessionDir)) {
         const defaultDir = path.join(sessionDir, 'Default');
-        const hasAuthData = fs.existsSync(defaultDir) && fs.readdirSync(defaultDir).length > 5;
+        const hasCookies = fs.existsSync(path.join(defaultDir, 'Cookies'));
+        const hasLocalStorage = fs.existsSync(path.join(defaultDir, 'Local Storage'));
+        const hasAuthData = hasCookies && hasLocalStorage;
         if (hasAuthData) {
-            console.log(`[Supabase-Session] Local session folder already exists for tenant ${tenantId}. Skipping restore.`);
+            console.log(`[Supabase-Session] Local session folder already exists for tenant ${tenantId} with valid auth data. Skipping restore.`);
             return true;
         } else {
-            console.log(`[Supabase-Session] Local folder for tenant ${tenantId} exists but has no valid auth data. Attempting Supabase restore...`);
-            // Remove the blank folder so we can extract properly
+            console.log(`[Supabase-Session] Local folder for tenant ${tenantId} exists but is missing critical auth files (Cookies=${hasCookies}, LocalStorage=${hasLocalStorage}). Attempting Supabase restore...`);
+            // Remove the stale folder so we can extract properly
             fs.rmSync(sessionDir, { recursive: true, force: true });
         }
     }
@@ -1173,6 +1176,32 @@ class SessionManager {
             this.statuses.set(tenantId, 'DISCONNECTED');
             broadcastSSE({ type: 'status', tenantId, status: 'DISCONNECTED' });
             this.sessions.delete(tenantId);
+
+            // If WhatsApp explicitly logged us out, the local session files are now
+            // invalid. Wipe them so the next boot can restore a valid session from Supabase.
+            if (reason === 'LOGOUT') {
+                const authPath = path.join(__dirname, `.wwebjs_auth/session-tenant-${tenantId}`);
+                try {
+                    if (fs.existsSync(authPath)) {
+                        fs.rmSync(authPath, { recursive: true, force: true });
+                        console.log(`[Sessions] 🗑️ Cleared invalidated local session files for tenant ${tenantId} after LOGOUT.`);
+                    }
+                } catch (cleanupErr) {
+                    console.error(`[Sessions] Error cleaning up session files after LOGOUT for tenant ${tenantId}:`, cleanupErr.message);
+                }
+            } else {
+                // For non-LOGOUT disconnects (e.g. network issues, browser crash),
+                // attempt auto-reconnect after a short delay
+                console.log(`[Sessions] ♻️ Will attempt auto-reconnect for tenant ${tenantId} in 15s...`);
+                setTimeout(() => {
+                    if (this.statuses.get(tenantId) === 'DISCONNECTED') {
+                        console.log(`[Sessions] ♻️ Auto-reconnecting tenant ${tenantId}...`);
+                        this.initializeSession(tenantId).catch(err => {
+                            console.error(`[Sessions] ♻️ Auto-reconnect failed for tenant ${tenantId}:`, err.message);
+                        });
+                    }
+                }, 15000);
+            }
         });
 
         try {
