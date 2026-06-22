@@ -285,6 +285,8 @@ const DEFAULT_CONFIG = {
     profileName: "",
     cateringWelcomeEnabled: false,
     cateringWelcomeMessage: "Hey! This is Tia from Homemade.\n\nThank you so much for signing up for a private chef{Name}! Can you provide your city so we're able to match you up with a Chef in your area?",
+    chefWelcomeEnabled: false,
+    chefWelcomeMessage: "Hey{Name}, thanks for signing up to become a chef on Homemade! 🧑‍🍳 We are super excited to have you.\n\nOur team is reviewing your details and we will reach out shortly to help you complete your onboarding. In the meantime, let us know if you have any questions!",
     noAnswerFollowupEnabled: false,
     noAnswerFollowupMessage: "Hey{Name}, we tried calling you regarding your Homemade application but it looks like you were not available. Let us know when is a good time to reach you, or if you prefer, we can just chat right here!",
     cateringNoAnswerFollowupEnabled: false,
@@ -358,6 +360,8 @@ async function getBrainConfig(tenantId) {
                     profileName: loaded.profileName || "",
                     cateringWelcomeEnabled: loaded.cateringWelcomeEnabled || false,
                     cateringWelcomeMessage: loaded.cateringWelcomeMessage || DEFAULT_CONFIG.cateringWelcomeMessage,
+                    chefWelcomeEnabled: loaded.chefWelcomeEnabled || false,
+                    chefWelcomeMessage: loaded.chefWelcomeMessage || DEFAULT_CONFIG.chefWelcomeMessage,
                     noAnswerFollowupEnabled: loaded.noAnswerFollowupEnabled || false,
                     noAnswerFollowupMessage: loaded.noAnswerFollowupMessage || DEFAULT_CONFIG.noAnswerFollowupMessage,
                     cateringNoAnswerFollowupEnabled: loaded.cateringNoAnswerFollowupEnabled || false,
@@ -391,6 +395,8 @@ async function getBrainConfig(tenantId) {
                 profileName: loaded.profileName || "",
                 cateringWelcomeEnabled: loaded.cateringWelcomeEnabled || false,
                 cateringWelcomeMessage: loaded.cateringWelcomeMessage || DEFAULT_CONFIG.cateringWelcomeMessage,
+                chefWelcomeEnabled: loaded.chefWelcomeEnabled || false,
+                chefWelcomeMessage: loaded.chefWelcomeMessage || DEFAULT_CONFIG.chefWelcomeMessage,
                 noAnswerFollowupEnabled: loaded.noAnswerFollowupEnabled || false,
                 noAnswerFollowupMessage: loaded.noAnswerFollowupMessage || DEFAULT_CONFIG.noAnswerFollowupMessage,
                 cateringNoAnswerFollowupEnabled: loaded.cateringNoAnswerFollowupEnabled || false,
@@ -1696,6 +1702,108 @@ if (crmSupabase) {
         console.log(`[Catering-NoAnswer-Daemon] Subscribed to Realtime UPDATE events for 'no_answer' triggers.`);
     } catch (err) {
         console.error('[Catering-NoAnswer-Daemon] Subscription error:', err.message);
+    }
+}
+
+
+// ------------------------------------------------------------------
+// "Chef Welcome" Onboarding Daemon (chef_profiles table in crmSupabase)
+// ------------------------------------------------------------------
+if (crmSupabase) {
+    const notifiedChefSignups = new Set();
+
+    // 1. Pre-populate existing chef profiles at startup so we don't greet historical signups on boot
+    (async () => {
+        try {
+            const { data, error } = await crmSupabase
+                .from('chef_profiles')
+                .select('id')
+                .limit(1000);
+
+            if (data && !error) {
+                data.forEach(row => notifiedChefSignups.add(row.id));
+                console.log(`[Chef-Welcome] Pre-populated ${notifiedChefSignups.size} existing chef profile IDs to ignore.`);
+            }
+        } catch (err) {
+            console.error('[Chef-Welcome] Startup pre-populate error:', err.message);
+        }
+    })();
+
+    const dispatchChefWelcomeMessage = async (chef) => {
+        if (!chef || !chef.contact_phone || notifiedChefSignups.has(chef.id)) return;
+
+        // Find which active sessions have chefWelcomeEnabled enabled in settings
+        const activeSenders = [];
+        for (const tId of Array.from(sessionManager.sessions.keys())) {
+            try {
+                if (sessionManager.getStatus(tId) !== 'READY') continue;
+                const config = await getBrainConfig(tId);
+                if (config.chefWelcomeEnabled) {
+                    activeSenders.push({ tId, config });
+                }
+            } catch (err) {
+                console.error(`[Chef-Welcome] Error checking config for ${tId}:`, err.message);
+            }
+        }
+
+        if (activeSenders.length === 0) {
+            console.log(`[Chef-Welcome] Dropping Chef Welcome message for ${chef.contact_phone} - feature is disabled on active target tenant(s).`);
+            return;
+        }
+
+        notifiedChefSignups.add(chef.id);
+        const sanitizedPhone = sanitizePhone(chef.contact_phone);
+        if (!sanitizedPhone) return;
+
+        const jid = `${sanitizedPhone}@c.us`;
+        const firstName = chef.chef_name ? chef.chef_name.trim().split(' ')[0] : '';
+        const nameReplacement = firstName ? ', ' + firstName : '';
+
+        for (const sender of activeSenders) {
+            const template = sender.config.chefWelcomeMessage || DEFAULT_CONFIG.chefWelcomeMessage;
+            const welcomeText = template.replace('{Name}', nameReplacement);
+            console.log(`[Chef-Welcome] 📩 Queueing welcome message for chef ${sanitizedPhone} (${chef.chef_name || 'N/A'}) on tenant: ${sender.tId}`);
+            sessionManager.queueMessage(sender.tId, jid, welcomeText);
+        }
+    };
+
+    try {
+        // 2. Subscribe to Realtime INSERT events
+        crmSupabase
+            .channel('public:chef_profiles')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chef_profiles' }, async (payload) => {
+                if (payload.new) {
+                    console.log(`[Chef-Welcome] Realtime caught new chef signup: ${payload.new.id}`);
+                    await dispatchChefWelcomeMessage(payload.new);
+                }
+            })
+            .subscribe();
+
+        // 3. Polling fallback engine (runs every 30 seconds checking new signups in the last 5 minutes)
+        setInterval(async () => {
+            try {
+                const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+                const { data, error } = await crmSupabase
+                    .from('chef_profiles')
+                    .select('*')
+                    .gte('created_at', fiveMinutesAgo);
+
+                if (data && !error) {
+                    for (const row of data) {
+                        if (!notifiedChefSignups.has(row.id)) {
+                            console.log(`[Chef-Welcome] Polling fallback caught new chef signup: ${row.id}`);
+                            await dispatchChefWelcomeMessage(row);
+                        }
+                    }
+                }
+            } catch (pollErr) {
+                console.error('[Chef-Welcome] Polling fallback exception:', pollErr.message);
+            }
+        }, 30000);
+
+        console.log(`[Chef-Welcome] Subscribed to Realtime INSERT events and Polling fallback for chef signups.`);
+    } catch (err) {
+        console.error('[Chef-Welcome] Subscription error:', err.message);
     }
 }
 

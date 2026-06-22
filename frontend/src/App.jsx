@@ -1687,6 +1687,37 @@ export default function App() {
                 )}
               </div>
 
+              {/* Chef Onboarding Auto Welcome */}
+              <div style={{ marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1.2rem' }}>
+                <h3 style={{ fontSize: '1rem', color: '#f47a44', marginBottom: '0.4rem' }}>👨‍🍳 Chef Onboarding Auto Welcome</h3>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem', marginBottom: '0.3rem' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={brainConfig.chefWelcomeEnabled || false}
+                    onChange={(e) => setBrainConfig({
+                      ...brainConfig,
+                      chefWelcomeEnabled: e.target.checked
+                    })}
+                  />
+                  <span>Send automatic welcome message from this WhatsApp profile</span>
+                </label>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginLeft: '1.5rem' }}>
+                  When checked, this account will greet new chef signups in the <code>chef_profiles</code> table (via CRM Supabase Realtime / Polling).
+                </span>
+                {brainConfig.chefWelcomeEnabled && (
+                  <div style={{ marginLeft: '1.5rem', marginTop: '0.8rem' }}>
+                    <textarea 
+                      className="chat-input"
+                      style={{ backgroundColor: 'var(--hover-chat)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.6rem', width: '100%', fontSize: '0.85rem', minHeight: '80px', resize: 'vertical' }}
+                      value={brainConfig.chefWelcomeMessage || ''}
+                      onChange={(e) => setBrainConfig({ ...brainConfig, chefWelcomeMessage: e.target.value })}
+                      placeholder="Enter welcome message. Use {Name} to insert chef's name."
+                    />
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>Use <code>{`{Name}`}</code> to dynamically insert the chef's first name.</div>
+                  </div>
+                )}
+              </div>
+
               {/* CRM No Answer Auto-Followup */}
               <div style={{ marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1.2rem' }}>
                 <h3 style={{ fontSize: '1rem', color: 'var(--accent-green)', marginBottom: '0.4rem' }}>☎️ CRM "No Answer" Followup</h3>
