@@ -286,6 +286,16 @@ async function restoreSessionFromSupabase(tenantId) {
 // Default Configuration Template
 const DEFAULT_CONFIG = {
     profileName: "",
+    crmSettings: {
+        enabled: false,
+        url: "",
+        key: ""
+    },
+    hyperzodSettings: {
+        enabled: false,
+        apiKey: "",
+        tenantId: ""
+    },
     cateringWelcomeEnabled: false,
     cateringWelcomeMessage: "Hey! This is Tia from Homemade.\n\nThank you so much for signing up for a private chef{Name}! Can you provide your city so we're able to match you up with a Chef in your area?",
     chefWelcomeEnabled: false,
@@ -361,6 +371,8 @@ async function getBrainConfig(tenantId) {
                 const loaded = data.settings;
                 return {
                     profileName: loaded.profileName || "",
+                    crmSettings: { ...DEFAULT_CONFIG.crmSettings, ...loaded.crmSettings },
+                    hyperzodSettings: { ...DEFAULT_CONFIG.hyperzodSettings, ...loaded.hyperzodSettings },
                     cateringWelcomeEnabled: loaded.cateringWelcomeEnabled || false,
                     cateringWelcomeMessage: loaded.cateringWelcomeMessage || DEFAULT_CONFIG.cateringWelcomeMessage,
                     chefWelcomeEnabled: loaded.chefWelcomeEnabled || false,
@@ -396,6 +408,8 @@ async function getBrainConfig(tenantId) {
             const loaded = JSON.parse(fs.readFileSync(tenantFile, 'utf8'));
             return {
                 profileName: loaded.profileName || "",
+                crmSettings: { ...DEFAULT_CONFIG.crmSettings, ...loaded.crmSettings },
+                hyperzodSettings: { ...DEFAULT_CONFIG.hyperzodSettings, ...loaded.hyperzodSettings },
                 cateringWelcomeEnabled: loaded.cateringWelcomeEnabled || false,
                 cateringWelcomeMessage: loaded.cateringWelcomeMessage || DEFAULT_CONFIG.cateringWelcomeMessage,
                 chefWelcomeEnabled: loaded.chefWelcomeEnabled || false,
@@ -449,6 +463,141 @@ async function saveBrainConfig(tenantId, newConfig) {
     fs.writeFileSync(tenantFile, JSON.stringify(newConfig, null, 2));
     console.log(`[Config] Configuration saved locally for tenant: ${tenantId}`);
 }
+
+// Tenant-specific CRM Supabase client resolver with memory caching
+const tenantCrmClientsMap = new Map();
+
+async function getCrmSupabase(tenantId) {
+    if (!tenantId || tenantId === 'default') {
+        if (crmSupabase) return crmSupabase;
+    }
+
+    if (tenantCrmClientsMap.has(tenantId)) {
+        return tenantCrmClientsMap.get(tenantId);
+    }
+
+    try {
+        const config = await getBrainConfig(tenantId);
+        if (config?.crmSettings?.enabled && config?.crmSettings?.url && config?.crmSettings?.key) {
+            let url = config.crmSettings.url.trim();
+            if (url.includes('/rest/v1')) url = url.split('/rest/v1')[0];
+            const key = config.crmSettings.key.trim();
+            if (url.startsWith('http') && key) {
+                const client = createClient(url, key);
+                tenantCrmClientsMap.set(tenantId, client);
+                return client;
+            }
+        }
+    } catch (e) {
+        console.error(`[CRM] Error building custom CRM client for tenant ${tenantId}:`, e.message);
+    }
+
+    return crmSupabase;
+}
+
+// Hyperzod Customer Sync Engine
+async function syncHyperzodCustomers(tenantId) {
+    const config = await getBrainConfig(tenantId);
+    const hzApiKey = config?.hyperzodSettings?.apiKey || process.env.HYPERZOD_API_KEY;
+    const hzTenant = config?.hyperzodSettings?.tenantId || process.env.HYPERZOD_TENANT_ID;
+
+    if (!hzApiKey || !hzTenant) {
+        throw new Error('Hyperzod API Key and Tenant ID are not configured for this workspace.');
+    }
+
+    const targetDb = (await getCrmSupabase(tenantId)) || supabase;
+    if (!targetDb) {
+        throw new Error('No database connection available to store customers.');
+    }
+
+    console.log(`[Hyperzod Sync] Starting customer & order sync for tenant: ${tenantId}...`);
+
+    let page = 1;
+    let hasMore = true;
+    let totalSynced = 0;
+    const customerMap = new Map();
+
+    while (hasMore && page <= 5) {
+        try {
+            const response = await fetch(`https://api.hyperzod.app/admin/v1/order/list?page=${page}&per_page=50`, {
+                method: 'POST',
+                headers: {
+                    'x-api-key': hzApiKey,
+                    'x-tenant': hzTenant,
+                    'accept': 'application/json',
+                    'content-type': 'application/json'
+                },
+                body: JSON.stringify({ per_page: 50, page })
+            });
+
+            if (!response.ok) {
+                console.error(`[Hyperzod Sync] HTTP ${response.status} fetching page ${page}`);
+                break;
+            }
+
+            const resJson = await response.json();
+            const orders = resJson?.data?.data ?? [];
+            if (!orders || orders.length === 0) {
+                hasMore = false;
+                break;
+            }
+
+            for (const order of orders) {
+                const user = order.user || order.customer || {};
+                const rawPhone = (user.phone || order.delivery_phone || order.phone || '').toString().replace(/\D/g, '');
+                if (!rawPhone || rawPhone.length < 8) continue;
+
+                const existing = customerMap.get(rawPhone) || {
+                    tenant_id: tenantId,
+                    hyperzod_user_id: (user.id || user.user_id || '').toString(),
+                    name: user.name || (user.first_name ? `${user.first_name || ''} ${user.last_name || ''}`.trim() : 'Customer'),
+                    phone: rawPhone,
+                    email: user.email || '',
+                    total_orders: 0,
+                    total_spent: 0.00,
+                    last_order_at: null,
+                    tags: ['Hyperzod Sync']
+                };
+
+                existing.total_orders += 1;
+                const amount = parseFloat(order.total_amount || order.grand_total || order.payable_amount || 0);
+                if (!isNaN(amount)) existing.total_spent += amount;
+
+                const orderDate = new Date(order.created_at || order.placed_at || Date.now());
+                if (!existing.last_order_at || orderDate > new Date(existing.last_order_at)) {
+                    existing.last_order_at = orderDate.toISOString();
+                }
+
+                customerMap.set(rawPhone, existing);
+            }
+
+            page++;
+        } catch (err) {
+            console.error(`[Hyperzod Sync] Error on page ${page}:`, err.message);
+            break;
+        }
+    }
+
+    const customersList = Array.from(customerMap.values());
+    for (const customer of customersList) {
+        try {
+            const { error } = await targetDb
+                .from('customers')
+                .upsert(customer, { onConflict: 'tenant_id,phone' });
+            if (!error) {
+                totalSynced++;
+            } else {
+                console.warn(`[Hyperzod Sync] Error upserting customer ${customer.phone}:`, error.message);
+            }
+        } catch (dbErr) {
+            console.error(`[Hyperzod Sync] DB exception for ${customer.phone}:`, dbErr.message);
+        }
+    }
+
+    console.log(`[Hyperzod Sync] Successfully synced ${totalSynced} customers for tenant ${tenantId}.`);
+    return { syncedCount: totalSynced, totalFound: customersList.length };
+}
+
 
 // Helper utilities
 function escapeRegExp(string) {
@@ -2036,7 +2185,12 @@ app.get('/api/:tenantId/chats', async (req, res) => {
     }
 
     const fetchAndMapChats = async () => {
+        console.log(`[API] Calling resolvedClient.getChats() for tenant ${tenantId}...`);
         const chats = await resolvedClient.getChats();
+        console.log(`[API] resolvedClient.getChats() returned ${chats ? chats.length : 0} chats for tenant ${tenantId}`);
+        if (!chats || chats.length === 0) {
+            return [];
+        }
         const chatList = await Promise.all(chats.slice(0, 100).map(async (chat) => {
             let lastMsgText = '';
             let lastMsgTime = chat.timestamp;
@@ -2093,6 +2247,142 @@ app.get('/api/:tenantId/chats', async (req, res) => {
             }
         }
         return res.status(500).json({ error: err.message });
+    }
+});
+
+// Debug endpoint: Get screenshot of the Puppeteer browser for a tenant
+app.get('/api/:tenantId/screenshot', async (req, res) => {
+    const { tenantId } = req.params;
+    const client = await sessionManager.getClient(tenantId);
+    if (!client) {
+        return res.status(404).send('Client session not found in sessionManager');
+    }
+    if (!client.pupPage) {
+        return res.status(404).send('Client pupPage not found. Session might be initializing or disconnected.');
+    }
+    try {
+        console.log(`[Screenshot] Taking screenshot for tenant: ${tenantId}...`);
+        const screenshot = await client.pupPage.screenshot({ type: 'png' });
+        res.setHeader('Content-Type', 'image/png');
+        return res.send(screenshot);
+    } catch (err) {
+        console.error(`[Screenshot] Error taking screenshot for ${tenantId}:`, err.message);
+        return res.status(500).send(`Error taking screenshot: ${err.message}`);
+    }
+});
+
+// Customer Management & Segmentation Endpoints
+app.get('/api/:tenantId/customers', async (req, res) => {
+    const { tenantId } = req.params;
+    const { tag, search } = req.query;
+    try {
+        const db = (await getCrmSupabase(tenantId)) || supabase;
+        if (!db) return res.status(500).json({ error: 'No database connection available' });
+
+        let query = db.from('customers').select('*').eq('tenant_id', tenantId);
+
+        if (tag) {
+            query = query.contains('tags', [tag]);
+        }
+        if (search) {
+            query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%`);
+        }
+
+        const { data, error } = await query.order('last_order_at', { ascending: false, nullsFirst: false });
+        if (error) throw error;
+        return res.json({ success: true, customers: data || [] });
+    } catch (e) {
+        console.error(`[Customers API] Error fetching customers for tenant ${tenantId}:`, e.message);
+        return res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/:tenantId/customers/sync', async (req, res) => {
+    const { tenantId } = req.params;
+    try {
+        const result = await syncHyperzodCustomers(tenantId);
+        return res.json({ success: true, result });
+    } catch (e) {
+        console.error(`[Customers API] Error syncing Hyperzod customers for ${tenantId}:`, e.message);
+        return res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/:tenantId/customers/:id/tags', async (req, res) => {
+    const { tenantId, id } = req.params;
+    const { tags } = req.body;
+    if (!Array.isArray(tags)) {
+        return res.status(400).json({ error: 'Tags must be an array of strings' });
+    }
+    try {
+        const db = (await getCrmSupabase(tenantId)) || supabase;
+        if (!db) return res.status(500).json({ error: 'No database connection available' });
+
+        const { data, error } = await db
+            .from('customers')
+            .update({ tags, updated_at: new Date().toISOString() })
+            .eq('id', id)
+            .eq('tenant_id', tenantId)
+            .select()
+            .single();
+
+        if (error) throw error;
+        return res.json({ success: true, customer: data });
+    } catch (e) {
+        return res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/:tenantId/campaign/send-segment', async (req, res) => {
+    const { tenantId } = req.params;
+    const { customerIds, tag, message } = req.body;
+
+    if (!message || !message.trim()) {
+        return res.status(400).json({ error: 'Message content is required.' });
+    }
+
+    if (sessionManager.getStatus(tenantId) !== 'READY') {
+        return res.status(503).json({ error: `WhatsApp client for tenant ${tenantId} is not READY.` });
+    }
+
+    try {
+        const db = (await getCrmSupabase(tenantId)) || supabase;
+        if (!db) return res.status(500).json({ error: 'No database connection available' });
+
+        let query = db.from('customers').select('*').eq('tenant_id', tenantId);
+
+        if (Array.isArray(customerIds) && customerIds.length > 0) {
+            query = query.in('id', customerIds);
+        } else if (tag) {
+            query = query.contains('tags', [tag]);
+        }
+
+        const { data: customers, error } = await query;
+        if (error) throw error;
+
+        if (!customers || customers.length === 0) {
+            return res.status(404).json({ error: 'No matching customers found for segment.' });
+        }
+
+        let queuedCount = 0;
+        customers.forEach(customer => {
+            const rawPhone = (customer.phone || '').replace(/\D/g, '');
+            if (rawPhone.length < 8) return;
+            const jid = `${rawPhone}@c.us`;
+
+            let personalizedMsg = message
+                .replace(/\{Name\}/g, customer.name || 'there')
+                .replace(/\{TotalOrders\}/g, customer.total_orders || 0)
+                .replace(/\{LastOrderDate\}/g, customer.last_order_at ? new Date(customer.last_order_at).toLocaleDateString() : 'N/A');
+
+            sessionManager.queueMessage(tenantId, jid, personalizedMsg);
+            queuedCount++;
+        });
+
+        return res.json({ success: true, queued: queuedCount, totalCustomers: customers.length });
+    } catch (e) {
+        console.error(`[Segment Broadcast] Error dispatching segment campaign for ${tenantId}:`, e.message);
+        return res.status(500).json({ error: e.message });
     }
 });
 

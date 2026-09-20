@@ -1458,3 +1458,24 @@ CREATE TRIGGER update_merchants_updated_at BEFORE UPDATE ON public.merchants FOR
 CREATE TRIGGER update_old_leads_updated_at BEFORE UPDATE ON public.old_leads FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER set_user_role_email BEFORE INSERT ON public.user_roles FOR EACH ROW EXECUTE FUNCTION populate_user_role_email();
 CREATE TRIGGER trg_populate_user_role_email BEFORE INSERT ON public.user_roles FOR EACH ROW EXECUTE FUNCTION populate_user_role_email();
+
+-- ============ TABLE: customers ============
+CREATE TABLE IF NOT EXISTS public.customers (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    hyperzod_user_id TEXT,
+    name TEXT,
+    phone TEXT NOT NULL,
+    email TEXT,
+    total_orders INT DEFAULT 0,
+    total_spent NUMERIC(10,2) DEFAULT 0.00,
+    last_order_at TIMESTAMPTZ,
+    tags TEXT[] DEFAULT '{}',
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT unique_tenant_phone UNIQUE (tenant_id, phone)
+);
+
+CREATE INDEX IF NOT EXISTS idx_customers_tenant ON public.customers(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_customers_tags ON public.customers USING GIN(tags);

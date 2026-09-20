@@ -263,12 +263,121 @@ export default function App() {
   const [suggestion, setSuggestion] = useState('');
   const [loadingSuggestion, setLoadingSuggestion] = useState(false);
   const [brainConfig, setBrainConfig] = useState({
+    profileName: '',
+    crmSettings: { enabled: false, url: '', key: '' },
+    hyperzodSettings: { enabled: false, apiKey: '', tenantId: '' },
     welcomeMessage: { enabled: false, template: '' },
     autoReply: { enabled: false, rules: [] },
     aiAgent: { enabled: false, provider: 'gemini', apiKey: '', systemPrompt: '' },
     webhook: { enabled: false, url: '' },
     emailNotification: { enabled: false, apiKey: '', fromEmail: '', toEmail: '', subject: '' }
   });
+
+  const [customers, setCustomers] = useState([]);
+  const [loadingCustomers, setLoadingCustomers] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [selectedTagFilter, setSelectedTagFilter] = useState('');
+  const [isSyncingCustomers, setIsSyncingCustomers] = useState(false);
+  const [editingCustomerTags, setEditingCustomerTags] = useState(null);
+  const [newTagInput, setNewTagInput] = useState('');
+  const [showSegmentModal, setShowSegmentModal] = useState(false);
+  const [segmentBroadcastMessage, setSegmentBroadcastMessage] = useState('');
+  const [isSendingSegmentBroadcast, setIsSendingSegmentBroadcast] = useState(false);
+
+  const loadCustomers = async (tag = selectedTagFilter, search = customerSearch) => {
+    setLoadingCustomers(true);
+    try {
+      let url = `/api/${tenantId}/customers?`;
+      if (tag) url += `tag=${encodeURIComponent(tag)}&`;
+      if (search) url += `search=${encodeURIComponent(search)}`;
+      const res = await apiFetch(url);
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setCustomers(data.customers || []);
+      }
+    } catch (e) {
+      console.error('Error fetching customers:', e);
+    } finally {
+      setLoadingCustomers(false);
+    }
+  };
+
+  const handleSyncHyperzod = async () => {
+    setIsSyncingCustomers(true);
+    try {
+      const res = await apiFetch(`/api/${tenantId}/customers/sync`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert(`Successfully synced ${data.result.syncedCount} customers from Hyperzod!`);
+        loadCustomers();
+      } else {
+        alert('Hyperzod sync failed: ' + (data.error || 'Unknown error'));
+      }
+    } catch (e) {
+      alert('Network error syncing Hyperzod customers: ' + e.message);
+    } finally {
+      setIsSyncingCustomers(false);
+    }
+  };
+
+  const handleAddTagToCustomer = async (customerId, currentTags, tagToAdd) => {
+    if (!tagToAdd || !tagToAdd.trim()) return;
+    const cleanTag = tagToAdd.trim();
+    if (currentTags.includes(cleanTag)) return;
+    const updated = [...currentTags, cleanTag];
+    await handleSaveCustomerTags(customerId, updated);
+  };
+
+  const handleRemoveTagFromCustomer = async (customerId, currentTags, tagToRemove) => {
+    const updated = currentTags.filter(t => t !== tagToRemove);
+    await handleSaveCustomerTags(customerId, updated);
+  };
+
+  const handleSaveCustomerTags = async (customerId, updatedTags) => {
+    try {
+      const res = await apiFetch(`/api/${tenantId}/customers/${customerId}/tags`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags: updatedTags })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setCustomers(prev => prev.map(c => c.id === customerId ? { ...c, tags: updatedTags } : c));
+      }
+    } catch (e) {
+      alert('Error updating customer tags: ' + e.message);
+    }
+  };
+
+  const handleSendSegmentBroadcast = async () => {
+    if (!segmentBroadcastMessage.trim()) {
+      alert('Please enter a message to broadcast');
+      return;
+    }
+    setIsSendingSegmentBroadcast(true);
+    try {
+      const res = await apiFetch(`/api/${tenantId}/campaign/send-segment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tag: selectedTagFilter || null,
+          message: segmentBroadcastMessage
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert(`Successfully queued ${data.queued} personalized WhatsApp messages!`);
+        setSegmentBroadcastMessage('');
+        setShowSegmentModal(false);
+      } else {
+        alert('Broadcast failed: ' + (data.error || 'Unknown error'));
+      }
+    } catch (e) {
+      alert('Network error sending segment broadcast: ' + e.message);
+    } finally {
+      setIsSendingSegmentBroadcast(false);
+    }
+  };
 
   const [showCampaigns, setShowCampaigns] = useState(false);
   const [campaignProfiles, setCampaignProfiles] = useState([]);
@@ -816,6 +925,27 @@ export default function App() {
           </button>
           <button 
             onClick={() => {
+              setActiveTab('customers');
+              loadCustomers();
+            }} 
+            style={{ 
+              flex: 1, 
+              padding: '0.75rem', 
+              border: 'none', 
+              borderBottom: activeTab === 'customers' ? '2.5px solid var(--accent-green)' : '2.5px solid transparent', 
+              background: 'none', 
+              color: activeTab === 'customers' ? 'var(--text-main)' : 'var(--text-muted)', 
+              fontWeight: activeTab === 'customers' ? 700 : 500, 
+              fontSize: '0.85rem', 
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              outline: 'none'
+            }}
+          >
+            👥 Customers
+          </button>
+          <button 
+            onClick={() => {
               setActiveTab('caterings');
               loadCateringLeads();
             }} 
@@ -895,6 +1025,172 @@ export default function App() {
               ))}
               {filteredChats.length === 0 && (
                 <div className="placeholder-text" style={{marginTop: '2rem', textAlign: 'center', color: 'var(--text-muted)'}}>No chats found.</div>
+              )}
+            </div>
+          </>
+        ) : activeTab === 'customers' ? (
+          <>
+            {/* Customers Control Bar */}
+            <div style={{ padding: '0.75rem 1rem', background: 'var(--panel-bg)', borderBottom: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <input 
+                  type="text" 
+                  className="search-input" 
+                  placeholder="Search customers..." 
+                  value={customerSearch}
+                  onChange={(e) => {
+                    setCustomerSearch(e.target.value);
+                    loadCustomers(selectedTagFilter, e.target.value);
+                  }}
+                  style={{ flex: 1, padding: '0.45rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--hover-chat)', color: 'var(--text-main)', fontSize: '0.85rem' }}
+                />
+                <button 
+                  onClick={handleSyncHyperzod}
+                  disabled={isSyncingCustomers}
+                  style={{
+                    padding: '0.45rem 0.75rem',
+                    borderRadius: '6px',
+                    border: 'none',
+                    backgroundColor: 'var(--accent-green)',
+                    color: 'white',
+                    fontWeight: 600,
+                    fontSize: '0.8rem',
+                    cursor: isSyncingCustomers ? 'not-allowed' : 'pointer',
+                    opacity: isSyncingCustomers ? 0.7 : 1,
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  {isSyncingCustomers ? 'Syncing...' : '⚡ Sync Hyperzod'}
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Tag Filter:</span>
+                  <select 
+                    value={selectedTagFilter}
+                    onChange={(e) => {
+                      setSelectedTagFilter(e.target.value);
+                      loadCustomers(e.target.value, customerSearch);
+                    }}
+                    style={{ backgroundColor: 'var(--hover-chat)', color: 'var(--text-main)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '2px 6px', fontSize: '0.75rem' }}
+                  >
+                    <option value="">All Tags</option>
+                    <option value="Hyperzod Sync">Hyperzod Sync</option>
+                    <option value="VIP">VIP</option>
+                    <option value="Frequent">Frequent</option>
+                    <option value="Inactive">Inactive</option>
+                  </select>
+                </div>
+                <button 
+                  onClick={() => setShowSegmentModal(true)}
+                  style={{
+                    padding: '0.35rem 0.65rem',
+                    borderRadius: '5px',
+                    border: '1px solid var(--accent-green)',
+                    backgroundColor: 'transparent',
+                    color: 'var(--accent-green)',
+                    fontWeight: 600,
+                    fontSize: '0.78rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  📣 Broadcast Segment
+                </button>
+              </div>
+            </div>
+
+            {/* Customers List */}
+            <div className="chat-list">
+              {loadingCustomers ? (
+                <div className="placeholder-text" style={{marginTop: '2rem', textAlign: 'center', color: 'var(--text-muted)'}}>Loading customers...</div>
+              ) : customers.length === 0 ? (
+                <div className="placeholder-text" style={{marginTop: '2rem', textAlign: 'center', color: 'var(--text-muted)'}}>No customers found. Click "Sync Hyperzod" to pull users.</div>
+              ) : (
+                customers.map(c => {
+                  const jid = `${c.phone}@c.us`;
+                  return (
+                    <div 
+                      key={c.id} 
+                      className="chat-item"
+                      style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.4rem', padding: '0.75rem 1rem' }}
+                    >
+                      <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                          <div className="avatar" style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)', width: '34px', height: '34px', fontSize: '0.85rem' }}>
+                            {getAvatarChar(c.name || 'C')}
+                          </div>
+                          <div>
+                            <span style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-main)' }}>{c.name || 'Customer'}</span>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>+{c.phone}</span>
+                          </div>
+                        </div>
+                        <button 
+                          onClick={() => {
+                            setActiveChat({
+                              id: jid,
+                              name: c.name || c.phone,
+                              lastMessage: '',
+                              timestamp: Math.floor(Date.now() / 1000),
+                              unreadCount: 0,
+                              unanswered: false
+                            });
+                            setActiveTab('chats');
+                          }}
+                          style={{ padding: '3px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', backgroundColor: 'var(--hover-chat)', color: 'var(--text-main)', fontSize: '0.75rem', cursor: 'pointer' }}
+                        >
+                          💬 Open Chat
+                        </button>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '1rem', fontSize: '0.73rem', color: 'var(--text-muted)' }}>
+                        <span>Orders: <strong style={{ color: 'var(--text-main)' }}>{c.total_orders || 0}</strong></span>
+                        <span>Spent: <strong style={{ color: 'var(--text-main)' }}>${parseFloat(c.total_spent || 0).toFixed(2)}</strong></span>
+                        {c.last_order_at && <span>Last: {new Date(c.last_order_at).toLocaleDateString()}</span>}
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', alignItems: 'center', marginTop: '0.2rem' }}>
+                        {(c.tags || []).map(tag => (
+                          <span 
+                            key={tag} 
+                            style={{ 
+                              fontSize: '0.65rem', 
+                              backgroundColor: 'rgba(139, 92, 246, 0.15)', 
+                              color: '#a78bfa', 
+                              border: '1px solid rgba(139, 92, 246, 0.3)', 
+                              borderRadius: '4px', 
+                              padding: '1px 6px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                          >
+                            {tag}
+                            <span 
+                              style={{ cursor: 'pointer', fontWeight: 'bold' }} 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveTagFromCustomer(c.id, c.tags || [], tag);
+                              }}
+                            >
+                              ×
+                            </span>
+                          </span>
+                        ))}
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const newTag = prompt(`Add a new tag for ${c.name}:`);
+                            if (newTag) handleAddTagToCustomer(c.id, c.tags || [], newTag);
+                          }}
+                          style={{ padding: '1px 5px', fontSize: '0.65rem', borderRadius: '3px', border: '1px dashed var(--border-color)', background: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                        >
+                          + Tag
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
               )}
             </div>
           </>
@@ -1656,6 +1952,90 @@ export default function App() {
                 />
               </div>
 
+              {/* Custom CRM Database Connection */}
+              <div style={{ marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1.2rem' }}>
+                <h3 style={{ fontSize: '1rem', color: '#8b5cf6', marginBottom: '0.4rem' }}>🔌 Custom CRM Database (Supabase)</h3>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem', marginBottom: '0.6rem' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={brainConfig.crmSettings?.enabled || false}
+                    onChange={(e) => setBrainConfig({
+                      ...brainConfig,
+                      crmSettings: { ...brainConfig.crmSettings, enabled: e.target.checked }
+                    })}
+                  />
+                  <span>Enable Custom CRM Supabase Connection for this Workspace</span>
+                </label>
+                {brainConfig.crmSettings?.enabled && (
+                  <div style={{ marginLeft: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                    <input 
+                      type="text" 
+                      className="chat-input"
+                      style={{ backgroundColor: 'var(--hover-chat)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.45rem 0.75rem', width: '100%', fontSize: '0.85rem' }}
+                      placeholder="https://xyz.supabase.co"
+                      value={brainConfig.crmSettings?.url || ''}
+                      onChange={(e) => setBrainConfig({
+                        ...brainConfig,
+                        crmSettings: { ...brainConfig.crmSettings, url: e.target.value }
+                      })}
+                    />
+                    <input 
+                      type="password" 
+                      className="chat-input"
+                      style={{ backgroundColor: 'var(--hover-chat)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.45rem 0.75rem', width: '100%', fontSize: '0.85rem' }}
+                      placeholder="Supabase Anon/Service Key"
+                      value={brainConfig.crmSettings?.key || ''}
+                      onChange={(e) => setBrainConfig({
+                        ...brainConfig,
+                        crmSettings: { ...brainConfig.crmSettings, key: e.target.value }
+                      })}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Hyperzod API Settings */}
+              <div style={{ marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1.2rem' }}>
+                <h3 style={{ fontSize: '1rem', color: '#ec4899', marginBottom: '0.4rem' }}>⚡ Hyperzod Storefront API</h3>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem', marginBottom: '0.6rem' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={brainConfig.hyperzodSettings?.enabled || false}
+                    onChange={(e) => setBrainConfig({
+                      ...brainConfig,
+                      hyperzodSettings: { ...brainConfig.hyperzodSettings, enabled: e.target.checked }
+                    })}
+                  />
+                  <span>Enable Hyperzod Customer Sync for this Workspace</span>
+                </label>
+                {brainConfig.hyperzodSettings?.enabled && (
+                  <div style={{ marginLeft: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                    <input 
+                      type="password" 
+                      className="chat-input"
+                      style={{ backgroundColor: 'var(--hover-chat)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.45rem 0.75rem', width: '100%', fontSize: '0.85rem' }}
+                      placeholder="Hyperzod API Key (x-api-key)"
+                      value={brainConfig.hyperzodSettings?.apiKey || ''}
+                      onChange={(e) => setBrainConfig({
+                        ...brainConfig,
+                        hyperzodSettings: { ...brainConfig.hyperzodSettings, apiKey: e.target.value }
+                      })}
+                    />
+                    <input 
+                      type="text" 
+                      className="chat-input"
+                      style={{ backgroundColor: 'var(--hover-chat)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.45rem 0.75rem', width: '100%', fontSize: '0.85rem' }}
+                      placeholder="Hyperzod Tenant ID (x-tenant)"
+                      value={brainConfig.hyperzodSettings?.tenantId || ''}
+                      onChange={(e) => setBrainConfig({
+                        ...brainConfig,
+                        hyperzodSettings: { ...brainConfig.hyperzodSettings, tenantId: e.target.value }
+                      })}
+                    />
+                  </div>
+                )}
+              </div>
+
               {/* Catering Leads Auto Welcome */}
               <div style={{ marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1.2rem' }}>
                 <h3 style={{ fontSize: '1rem', color: 'var(--accent-blue)', marginBottom: '0.4rem' }}>✉️ Catering Leads Auto Welcome</h3>
@@ -2219,6 +2599,66 @@ export default function App() {
                   Messages will be sent with a 5-15 second random delay to simulate human typing and prevent WhatsApp bans.
                 </p>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Segment Broadcast Modal */}
+      {showSegmentModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, backdropFilter: 'blur(3px)' }}>
+          <div style={{ backgroundColor: 'var(--bg-chat)', border: '1px solid var(--border-color)', borderRadius: '12px', width: '90%', maxWidth: '550px', padding: '2rem', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.04)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem' }}>
+              <h2 style={{ margin: 0, color: 'var(--text-main)', fontSize: '1.25rem' }}>📣 Broadcast to Customer Segment</h2>
+              <button onClick={() => setShowSegmentModal(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '1.5rem', cursor: 'pointer' }}>×</button>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.4rem', fontWeight: 600 }}>Target Segment Tag Filter</label>
+                <select 
+                  value={selectedTagFilter}
+                  onChange={(e) => setSelectedTagFilter(e.target.value)}
+                  style={{ width: '100%', padding: '0.6rem', backgroundColor: 'var(--hover-chat)', border: '1px solid var(--border-color)', color: 'var(--text-main)', borderRadius: '6px', fontSize: '0.9rem' }}
+                >
+                  <option value="">All Customers in Workspace</option>
+                  <option value="Hyperzod Sync">Hyperzod Sync</option>
+                  <option value="VIP">VIP</option>
+                  <option value="Frequent">Frequent</option>
+                  <option value="Inactive">Inactive</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.4rem', fontWeight: 600 }}>Personalized Message Template</label>
+                <textarea 
+                  className="chat-input"
+                  rows={5}
+                  style={{ width: '100%', padding: '0.75rem', backgroundColor: 'var(--hover-chat)', border: '1px solid var(--border-color)', color: 'var(--text-main)', borderRadius: '6px', fontSize: '0.9rem', resize: 'vertical' }}
+                  placeholder="Hey {Name}! Thanks for your {TotalOrders} orders with us. Here is a special discount for your next order..."
+                  value={segmentBroadcastMessage}
+                  onChange={(e) => setSegmentBroadcastMessage(e.target.value)}
+                />
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
+                  Available Placeholders: <code>{`{Name}`}</code>, <code>{`{TotalOrders}`}</code>, <code>{`{LastOrderDate}`}</code>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem', marginTop: '1.5rem' }}>
+              <button 
+                type="button" 
+                onClick={() => setShowSegmentModal(false)} 
+                style={{ backgroundColor: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-main)', borderRadius: '6px', padding: '0.5rem 1.25rem', fontSize: '0.9rem', cursor: 'pointer', fontWeight: 600 }}
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleSendSegmentBroadcast}
+                disabled={isSendingSegmentBroadcast || !segmentBroadcastMessage.trim()}
+                style={{ backgroundColor: 'var(--accent-green)', border: 'none', color: '#ffffff', borderRadius: '6px', padding: '0.5rem 1.5rem', fontSize: '0.9rem', cursor: 'pointer', fontWeight: 600, opacity: isSendingSegmentBroadcast ? 0.6 : 1 }}
+              >
+                {isSendingSegmentBroadcast ? 'Queueing Broadcast...' : 'Dispatch Broadcast'}
+              </button>
             </div>
           </div>
         </div>
