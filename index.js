@@ -2420,54 +2420,79 @@ app.get('/api/:tenantId/chats', async (req, res) => {
                             console.log(`[API] 🔄 WWebJS script missing on page for ${tenantId}. Injecting WWebJS...`);
                             await client.inject();
                         }
-                        chats = await client.pupPage.evaluate(() => {
+                        const evalResult = await client.pupPage.evaluate(() => {
                             try {
-                                const chatModels = (window.Store && window.Store.Chat && window.Store.Chat.models)
-                                    ? window.Store.Chat.models
-                                    : (window.Store && window.Store.Chat && typeof window.Store.Chat.getModelsArray === 'function' ? window.Store.Chat.getModelsArray() : null);
-
-                                if (chatModels && Array.isArray(chatModels)) {
-                                    return chatModels.slice(0, 100).map(c => {
-                                        let lastMsg = '';
-                                        let lastTime = c.t || c.timestamp || 0;
-                                        let fromMe = true;
-                                        try {
-                                            const lm = c.lastMessage || (c.msgs && typeof c.msgs.last === 'function' ? c.msgs.last() : null) || (c.msgs && c.msgs.models && c.msgs.models.length > 0 ? c.msgs.models[c.msgs.models.length - 1] : null);
-                                            if (lm) {
-                                                lastMsg = lm.body || lm.caption || '';
-                                                lastTime = lm.t || lm.timestamp || lastTime;
-                                                fromMe = lm.id ? (lm.id.fromMe ?? true) : true;
-                                            }
-                                        } catch (e) {}
-
-                                        let idStr = '';
-                                        try {
-                                            idStr = c.id ? (c.id._serialized || c.id.user || String(c.id)) : '';
-                                        } catch (e) {}
-
-                                        let nameStr = '';
-                                        try {
-                                            nameStr = c.name || c.formattedTitle || (c.contact ? (c.contact.name || c.contact.pushname) : '') || (idStr ? idStr.split('@')[0] : '');
-                                        } catch (e) {}
-
-                                        return {
-                                            id: { _serialized: idStr, user: idStr ? idStr.split('@')[0] : '' },
-                                            name: nameStr || idStr,
-                                            timestamp: lastTime,
-                                            unreadCount: c.unreadCount || 0,
-                                            lastMessage: { body: lastMsg, timestamp: lastTime, fromMe }
-                                        };
-                                    }).filter(item => item && item.id && item.id._serialized);
+                                if (!window.Store || !window.Store.Chat) {
+                                    return { error: 'Store or Store.Chat not available', storePresent: !!window.Store };
                                 }
-                            } catch (e) {}
+                                const chatStore = window.Store.Chat;
+                                let list = null;
+                                if (Array.isArray(chatStore.models)) {
+                                    list = chatStore.models;
+                                } else if (Array.isArray(chatStore._models)) {
+                                    list = chatStore._models;
+                                } else if (typeof chatStore.getModelsArray === 'function') {
+                                    try { list = chatStore.getModelsArray(); } catch(e) {}
+                                } else if (chatStore.models && Array.isArray(chatStore.models._models)) {
+                                    list = chatStore.models._models;
+                                }
 
-                            if (window.WWebJS && typeof window.WWebJS.getChats === 'function') {
-                                return window.WWebJS.getChats();
+                                if (!list || !Array.isArray(list)) {
+                                    return { error: 'Could not extract models array', chatStoreKeys: Object.keys(chatStore) };
+                                }
+
+                                const mapped = list.slice(0, 100).map(c => {
+                                    if (!c) return null;
+                                    let lastMsg = '';
+                                    let lastTime = c.t || c.timestamp || 0;
+                                    let fromMe = true;
+
+                                    try {
+                                        const lm = c.lastMessage || 
+                                                   (c.msgs && typeof c.msgs.last === 'function' ? c.msgs.last() : null) || 
+                                                   (c.msgs && Array.isArray(c.msgs._models) && c.msgs._models.length > 0 ? c.msgs._models[c.msgs._models.length - 1] : null) ||
+                                                   (c.msgs && Array.isArray(c.msgs.models) && c.msgs.models.length > 0 ? c.msgs.models[c.msgs.models.length - 1] : null);
+                                        if (lm) {
+                                            lastMsg = lm.body || lm.caption || (lm.type === 'image' ? '📷 Photo' : lm.type === 'video' ? '📹 Video' : lm.type === 'audio' || lm.type === 'ptt' ? '🎵 Audio' : lm.type === 'document' ? '📄 Document' : '');
+                                            lastTime = lm.t || lm.timestamp || lastTime;
+                                            fromMe = lm.id ? (lm.id.fromMe ?? true) : true;
+                                        }
+                                    } catch (e) {}
+
+                                    let idStr = '';
+                                    try {
+                                        if (c.id) {
+                                            idStr = typeof c.id === 'string' ? c.id : (c.id._serialized || c.id.user || '');
+                                        }
+                                    } catch (e) {}
+
+                                    let nameStr = '';
+                                    try {
+                                        nameStr = c.name || c.formattedTitle || (c.contact ? (c.contact.name || c.contact.pushname || c.contact.shortName) : '') || (idStr ? idStr.split('@')[0] : '');
+                                    } catch (e) {}
+
+                                    if (!idStr) return null;
+
+                                    return {
+                                        id: { _serialized: idStr, user: idStr.split('@')[0] },
+                                        name: nameStr || idStr,
+                                        timestamp: lastTime,
+                                        unreadCount: c.unreadCount || 0,
+                                        lastMessage: { body: lastMsg, timestamp: lastTime, fromMe }
+                                    };
+                                }).filter(Boolean);
+
+                                return { chats: mapped };
+                            } catch (err) {
+                                return { error: String(err && err.stack ? err.stack : err) };
                             }
-                            return null;
                         });
-                        if (chats) {
-                            console.log(`[API] Direct pupPage evaluate returned ${chats.length} raw chats for tenant ${tenantId}`);
+
+                        if (evalResult && evalResult.chats) {
+                            chats = evalResult.chats;
+                            console.log(`[API] Safe evaluate extracted ${chats.length} raw chats for tenant ${tenantId}`);
+                        } else if (evalResult && evalResult.error) {
+                            console.log(`[API] Safe evaluate notice for ${tenantId}:`, evalResult.error, evalResult.chatStoreKeys || evalResult.storePresent || '');
                         }
                     } catch (evalErr) {
                         console.warn(`[API] Direct evaluate warning for ${tenantId}:`, evalErr ? (evalErr.stack || evalErr.message || evalErr) : 'unknown error');
@@ -2475,12 +2500,16 @@ app.get('/api/:tenantId/chats', async (req, res) => {
                 }
 
                 if (!chats || chats.length === 0) {
-                    const getChatsPromise = client.getChats();
-                    const timeoutPromise = new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error('client.getChats() timeout (10s)')), 10000)
-                    );
-                    chats = await Promise.race([getChatsPromise, timeoutPromise]);
-                    console.log(`[API] client.getChats() returned ${chats ? chats.length : 0} chats for tenant ${tenantId}`);
+                    try {
+                        const getChatsPromise = client.getChats();
+                        const timeoutPromise = new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error('client.getChats() timeout (10s)')), 10000)
+                        );
+                        chats = await Promise.race([getChatsPromise, timeoutPromise]);
+                        console.log(`[API] client.getChats() returned ${chats ? chats.length : 0} chats for tenant ${tenantId}`);
+                    } catch (gErr) {
+                        console.log(`[API] Fallback client.getChats() failed for ${tenantId}:`, gErr.message || gErr);
+                    }
                 }
 
                 if (chats && chats.length > 0) {
