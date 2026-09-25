@@ -2460,7 +2460,20 @@ app.get('/api/:tenantId/chats', async (req, res) => {
                                         hasRequire: typeof window.require === 'function'
                                     };
                                 }
-                                const chatStore = window.Store.Chat;
+                                let chatStore = window.Store.Chat;
+                                if (chatStore) {
+                                    if (chatStore.ChatCollection) chatStore = chatStore.ChatCollection;
+                                    else if (chatStore.ChatCollectionImpl) chatStore = chatStore.ChatCollectionImpl;
+                                    else if (chatStore.default) chatStore = chatStore.default;
+                                }
+                                if ((!chatStore || typeof chatStore !== 'object') && window.Store.ChatCollection) {
+                                    chatStore = window.Store.ChatCollection;
+                                }
+
+                                if (!chatStore) {
+                                    return { error: 'chatStore unwrap failed', rawChat: window.Store ? Object.keys(window.Store) : [] };
+                                }
+
                                 let list = null;
                                 if (Array.isArray(chatStore._models)) {
                                     list = chatStore._models;
