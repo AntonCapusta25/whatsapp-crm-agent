@@ -502,8 +502,73 @@ async function getCrmSupabase(tenantId) {
     return crmSupabase;
 }
 
-// In-memory customer cache for instant display fallback
-const tenantCustomersMap = new Map();
+// Persistent Local Customer Store (Disk-backed inside /app/backups)
+const STORE_FILE = path.join(__dirname, 'backups', 'customers_store.json');
+
+class LocalStore {
+    constructor() {
+        this.data = {}; // tenantId -> Map(phone -> customerObj)
+        this.load();
+    }
+
+    load() {
+        try {
+            const dir = path.dirname(STORE_FILE);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            if (fs.existsSync(STORE_FILE)) {
+                const raw = fs.readFileSync(STORE_FILE, 'utf8');
+                this.data = JSON.parse(raw) || {};
+                console.log(`[LocalStore] Loaded persistent customer store from disk.`);
+            }
+        } catch (e) {
+            console.error('[LocalStore] Error loading customer store:', e.message);
+            this.data = {};
+        }
+    }
+
+    save() {
+        try {
+            const dir = path.dirname(STORE_FILE);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(STORE_FILE, JSON.stringify(this.data, null, 2));
+        } catch (e) {
+            console.error('[LocalStore] Error saving customer store:', e.message);
+        }
+    }
+
+    getCustomers(tenantId, tag, search) {
+        const tenantMap = this.data[tenantId] || {};
+        let list = Object.values(tenantMap);
+
+        if (tag) {
+            list = list.filter(c => (c.tags || []).includes(tag));
+        }
+        if (search) {
+            const s = search.toLowerCase();
+            list = list.filter(c =>
+                (c.name || '').toLowerCase().includes(s) ||
+                (c.phone || '').includes(s) ||
+                (c.email || '').toLowerCase().includes(s)
+            );
+        }
+
+        list.sort((a, b) => new Date(b.last_order_at || 0) - new Date(a.last_order_at || 0));
+        return list;
+    }
+
+    saveCustomers(tenantId, customerList) {
+        if (!this.data[tenantId]) this.data[tenantId] = {};
+        for (const c of customerList) {
+            if (c.phone) {
+                const existing = this.data[tenantId][c.phone] || {};
+                this.data[tenantId][c.phone] = { ...existing, ...c };
+            }
+        }
+        this.save();
+    }
+}
+
+const localStore = new LocalStore();
 
 // Hyperzod Customer Sync Engine
 async function syncHyperzodCustomers(tenantId) {
@@ -586,7 +651,7 @@ async function syncHyperzodCustomers(tenantId) {
     }
 
     const customersList = Array.from(customerMap.values());
-    tenantCustomersMap.set(tenantId, customersList);
+    localStore.saveCustomers(tenantId, customersList);
 
     if (targetDb) {
         for (const customer of customersList) {
@@ -2329,35 +2394,34 @@ app.get('/api/:tenantId/customers', async (req, res) => {
         let dbCustomers = [];
 
         if (db) {
-            let query = db.from('customers').select('*').eq('tenant_id', tenantId);
+            try {
+                let query = db.from('customers').select('*').eq('tenant_id', tenantId);
 
-            if (tag) {
-                query = query.contains('tags', [tag]);
-            }
-            if (search) {
-                query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%`);
-            }
+                if (tag) {
+                    query = query.contains('tags', [tag]);
+                }
+                if (search) {
+                    query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%`);
+                }
 
-            const { data, error } = await query.order('last_order_at', { ascending: false, nullsFirst: false });
-            if (!error && data && data.length > 0) {
-                dbCustomers = data;
+                const { data, error } = await query.order('last_order_at', { ascending: false, nullsFirst: false });
+                if (!error && data && data.length > 0) {
+                    dbCustomers = data;
+                    localStore.saveCustomers(tenantId, data);
+                }
+            } catch (dbErr) {
+                console.warn(`[Customers API] Supabase warning for ${tenantId}:`, dbErr.message);
             }
         }
 
-        // Fallback to in-memory synced customers if DB is empty or missing table
-        if (dbCustomers.length === 0 && tenantCustomersMap.has(tenantId)) {
-            let list = tenantCustomersMap.get(tenantId) || [];
-            if (tag) list = list.filter(c => (c.tags || []).includes(tag));
-            if (search) {
-                const s = search.toLowerCase();
-                list = list.filter(c => (c.name || '').toLowerCase().includes(s) || (c.phone || '').includes(s) || (c.email || '').toLowerCase().includes(s));
-            }
-            dbCustomers = list;
+        // Fallback to localStore disk database if DB returns empty or table missing
+        if (dbCustomers.length === 0) {
+            dbCustomers = localStore.getCustomers(tenantId, tag, search);
         }
 
         return res.json({ success: true, customers: dbCustomers });
     } catch (e) {
-        const fallback = tenantCustomersMap.get(tenantId) || [];
+        const fallback = localStore.getCustomers(tenantId, tag, search);
         return res.json({ success: true, customers: fallback, warning: e.message });
     }
 });
