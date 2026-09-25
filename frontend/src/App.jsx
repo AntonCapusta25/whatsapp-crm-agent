@@ -77,6 +77,9 @@ const PRESET_ANSWERS = [
 ];
 
 export default function App() {
+  // ----------------------------------------------------------------
+  // ALL hooks must be declared before any conditional return
+  // ----------------------------------------------------------------
   const [tenantId, setTenantId] = useState(localStorage.getItem('whatsapp_tenant_id') || 'default');
   const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('agent_auth_token'));
   const [authEmail, setAuthEmail] = useState('');
@@ -91,6 +94,60 @@ export default function App() {
   const [tenantsList, setTenantsList] = useState([{ id: 'default', name: 'default' }]);
   const [isCreatingNewTenant, setIsCreatingNewTenant] = useState(false);
   const [newTenantName, setNewTenantName] = useState('');
+
+  // App state (must be declared before any early returns)
+  const [chats, setChats] = useState([]);
+  const [activeChat, setActiveChat] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [inputText, setInputText] = useState('');
+  const [activeTab, setActiveTab] = useState('chats');
+  const [cateringLeads, setCateringLeads] = useState([]);
+  const [loadingCaterings, setLoadingCaterings] = useState(false);
+  const [cateringSearchTerm, setCateringSearchTerm] = useState('');
+  const [showSettings, setShowSettings] = useState(false);
+  const [crmContext, setCrmContext] = useState(null);
+  const [crmType, setCrmType] = useState('');
+  const [loadingCrm, setLoadingCrm] = useState(false);
+  const [crmError, setCrmError] = useState('');
+  const [suggestion, setSuggestion] = useState('');
+  const [loadingSuggestion, setLoadingSuggestion] = useState(false);
+  const [brainConfig, setBrainConfig] = useState({
+    profileName: '',
+    enabledTabs: { chats: true, customers: true, caterings: true },
+    crmSettings: { enabled: false, url: '', key: '' },
+    hyperzodSettings: { enabled: false, apiKey: '', tenantId: '' },
+    welcomeMessage: { enabled: false, template: '' },
+    autoReply: { enabled: false, rules: [] },
+    aiAgent: { enabled: false, provider: 'gemini', apiKey: '', systemPrompt: '' },
+    webhook: { enabled: false, url: '' },
+    emailNotification: { enabled: false, apiKey: '', fromEmail: '', toEmail: '', subject: '' }
+  });
+  const [showNewWorkspaceModal, setShowNewWorkspaceModal] = useState(false);
+  const [newWorkspaceName, setNewWorkspaceName] = useState('');
+  const [newWorkspacePreset, setNewWorkspacePreset] = useState('hyperzod');
+  const [customers, setCustomers] = useState([]);
+  const [loadingCustomers, setLoadingCustomers] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [selectedTagFilter, setSelectedTagFilter] = useState('');
+  const [isSyncingCustomers, setIsSyncingCustomers] = useState(false);
+  const [editingCustomerTags, setEditingCustomerTags] = useState(null);
+  const [newTagInput, setNewTagInput] = useState('');
+  const [showSegmentModal, setShowSegmentModal] = useState(false);
+  const [segmentBroadcastMessage, setSegmentBroadcastMessage] = useState('');
+  const [isSendingSegmentBroadcast, setIsSendingSegmentBroadcast] = useState(false);
+  const [showCampaigns, setShowCampaigns] = useState(false);
+  const [campaignProfiles, setCampaignProfiles] = useState([]);
+  const [selectedCampaignProfiles, setSelectedCampaignProfiles] = useState(new Set());
+  const [campaignMessage, setCampaignMessage] = useState('');
+  const [campaignFilter, setCampaignFilter] = useState('all');
+  const [isSendingCampaign, setIsSendingCampaign] = useState(false);
+  const [showNewChat, setShowNewChat] = useState(false);
+  const [newChatPhone, setNewChatPhone] = useState('');
+  const [newChatMessage, setNewChatMessage] = useState('');
+  const [isSendingNewChat, setIsSendingNewChat] = useState(false);
+  const messagesEndRef = useRef(null);
+  const activeChatRef = useRef(null);
 
   const apiFetch = async (url, options = {}) => {
     const token = localStorage.getItem("agent_auth_token");
@@ -228,17 +285,10 @@ export default function App() {
     );
   }
 
-  
-  const [chats, setChats] = useState([]);
-  const [activeChat, setActiveChat] = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [inputText, setInputText] = useState('');
-  
-  const [activeTab, setActiveTab] = useState('chats');
-  const [cateringLeads, setCateringLeads] = useState([]);
-  const [loadingCaterings, setLoadingCaterings] = useState(false);
-  const [cateringSearchTerm, setCateringSearchTerm] = useState('');
+
+  // ----------------------------------------------------------------
+  // Event handlers and async functions (no hooks below this line)
+  // ----------------------------------------------------------------
 
   const loadCateringLeads = async () => {
     setLoadingCaterings(true);
@@ -255,40 +305,6 @@ export default function App() {
     }
   };
   
-  const [showSettings, setShowSettings] = useState(false);
-  const [crmContext, setCrmContext] = useState(null);
-  const [crmType, setCrmType] = useState(''); // 'chef' or 'catering'
-  const [loadingCrm, setLoadingCrm] = useState(false);
-  const [crmError, setCrmError] = useState('');
-  const [suggestion, setSuggestion] = useState('');
-  const [loadingSuggestion, setLoadingSuggestion] = useState(false);
-  const [brainConfig, setBrainConfig] = useState({
-    profileName: '',
-    enabledTabs: { chats: true, customers: true, caterings: true },
-    crmSettings: { enabled: false, url: '', key: '' },
-    hyperzodSettings: { enabled: false, apiKey: '', tenantId: '' },
-    welcomeMessage: { enabled: false, template: '' },
-    autoReply: { enabled: false, rules: [] },
-    aiAgent: { enabled: false, provider: 'gemini', apiKey: '', systemPrompt: '' },
-    webhook: { enabled: false, url: '' },
-    emailNotification: { enabled: false, apiKey: '', fromEmail: '', toEmail: '', subject: '' }
-  });
-
-  const [showNewWorkspaceModal, setShowNewWorkspaceModal] = useState(false);
-  const [newWorkspaceName, setNewWorkspaceName] = useState('');
-  const [newWorkspacePreset, setNewWorkspacePreset] = useState('hyperzod');
-
-  const [customers, setCustomers] = useState([]);
-  const [loadingCustomers, setLoadingCustomers] = useState(false);
-  const [customerSearch, setCustomerSearch] = useState('');
-  const [selectedTagFilter, setSelectedTagFilter] = useState('');
-  const [isSyncingCustomers, setIsSyncingCustomers] = useState(false);
-  const [editingCustomerTags, setEditingCustomerTags] = useState(null);
-  const [newTagInput, setNewTagInput] = useState('');
-  const [showSegmentModal, setShowSegmentModal] = useState(false);
-  const [segmentBroadcastMessage, setSegmentBroadcastMessage] = useState('');
-  const [isSendingSegmentBroadcast, setIsSendingSegmentBroadcast] = useState(false);
-
   const loadCustomers = async (tag = selectedTagFilter, search = customerSearch) => {
     setLoadingCustomers(true);
     try {
@@ -435,16 +451,7 @@ export default function App() {
     }
   };
 
-  const [showCampaigns, setShowCampaigns] = useState(false);
-  const [campaignProfiles, setCampaignProfiles] = useState([]);
-  const [selectedCampaignProfiles, setSelectedCampaignProfiles] = useState(new Set());
-  const [campaignMessage, setCampaignMessage] = useState('');
-  const [campaignFilter, setCampaignFilter] = useState('all');
-  const [isSendingCampaign, setIsSendingCampaign] = useState(false);
-  const [showNewChat, setShowNewChat] = useState(false);
-  const [newChatPhone, setNewChatPhone] = useState('');
-  const [newChatMessage, setNewChatMessage] = useState('');
-  const [isSendingNewChat, setIsSendingNewChat] = useState(false);
+
 
   const loadCampaignProfiles = async () => {
     try {
@@ -515,8 +522,6 @@ export default function App() {
     }
   };
 
-  const messagesEndRef = useRef(null);
-  const activeChatRef = useRef(null);
   useEffect(() => {
     activeChatRef.current = activeChat;
   }, [activeChat]);

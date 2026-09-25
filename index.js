@@ -6,6 +6,10 @@ process.on('uncaughtException', (err) => {
 });
 
 process.on('unhandledRejection', (reason, promise) => {
+    if (reason && reason.message && reason.message.includes('onQRChangedEvent')) {
+        console.warn('⚠️ [Process] Ignored onQRChangedEvent duplicate binding error:', reason.message);
+        return;
+    }
     console.error('🔥 [Process] Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
@@ -582,14 +586,69 @@ async function syncHyperzodCustomers(tenantId) {
 
     const targetDb = (await getCrmSupabase(tenantId)) || supabase;
 
-    console.log(`[Hyperzod Sync] Starting customer & order sync for tenant: ${tenantId}...`);
+    console.log(`[Hyperzod Sync] Starting full user sync for tenant: ${tenantId}...`);
 
+    const customerMap = new Map(); // phone -> customerObj
+
+    // ----------------------------------------------------------------
+    // STEP 1: Pull ALL registered users via GET /admin/v1/auth/user/all
+    // (This is the correct endpoint per Hyperzod API docs)
+    // ----------------------------------------------------------------
     let page = 1;
     let hasMore = true;
-    let totalSynced = 0;
-    const customerMap = new Map();
+    while (hasMore && page <= 50) {
+        try {
+            const response = await fetch(`https://api.hyperzod.app/admin/v1/auth/user/all?page=${page}&per_page=50`, {
+                method: 'GET',
+                headers: {
+                    'x-api-key': hzApiKey,
+                    'x-tenant': hzTenant,
+                    'accept': 'application/json'
+                }
+            });
 
-    while (hasMore && page <= 20) {
+            if (!response.ok) {
+                console.error(`[Hyperzod Sync] HTTP ${response.status} fetching user page ${page}`);
+                break;
+            }
+
+            const resJson = await response.json();
+            const users = resJson?.data?.data ?? [];
+            if (!users || users.length === 0) { hasMore = false; break; }
+
+            for (const user of users) {
+                const rawPhone = (user.mobile || user.phone || '').toString().replace(/\D/g, '');
+                if (!rawPhone || rawPhone.length < 8) continue;
+                const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Customer';
+                customerMap.set(rawPhone, {
+                    tenant_id: tenantId,
+                    hyperzod_user_id: (user.id || '').toString(),
+                    name: fullName,
+                    phone: rawPhone,
+                    email: user.email || '',
+                    total_orders: 0,
+                    total_spent: 0.00,
+                    last_order_at: null,
+                    tags: ['Hyperzod User'],
+                });
+            }
+
+            const lastPage = resJson?.data?.last_page ?? 1;
+            if (page >= lastPage) { hasMore = false; } else { page++; }
+        } catch (err) {
+            console.error(`[Hyperzod Sync] Error fetching user page ${page}:`, err.message);
+            break;
+        }
+    }
+
+    console.log(`[Hyperzod Sync] Fetched ${customerMap.size} unique users from /auth/user/all`);
+
+    // ----------------------------------------------------------------
+    // STEP 2: Enrich with order history (total_orders, total_spent, last_order_at)
+    // ----------------------------------------------------------------
+    page = 1;
+    hasMore = true;
+    while (hasMore && page <= 50) {
         try {
             const response = await fetch(`https://api.hyperzod.app/admin/v1/order/list?page=${page}&per_page=50`, {
                 method: 'POST',
@@ -603,16 +662,13 @@ async function syncHyperzodCustomers(tenantId) {
             });
 
             if (!response.ok) {
-                console.error(`[Hyperzod Sync] HTTP ${response.status} fetching page ${page}`);
+                console.error(`[Hyperzod Sync] HTTP ${response.status} fetching order page ${page}`);
                 break;
             }
 
             const resJson = await response.json();
             const orders = resJson?.data?.data ?? [];
-            if (!orders || orders.length === 0) {
-                hasMore = false;
-                break;
-            }
+            if (!orders || orders.length === 0) { hasMore = false; break; }
 
             for (const order of orders) {
                 const user = order.user || order.customer || {};
@@ -628,7 +684,7 @@ async function syncHyperzodCustomers(tenantId) {
                     total_orders: 0,
                     total_spent: 0.00,
                     last_order_at: null,
-                    tags: ['Hyperzod Sync']
+                    tags: ['Hyperzod User'],
                 };
 
                 existing.total_orders += 1;
@@ -640,12 +696,17 @@ async function syncHyperzodCustomers(tenantId) {
                     existing.last_order_at = orderDate.toISOString();
                 }
 
+                if (!existing.tags.includes('Has Orders')) {
+                    existing.tags = [...existing.tags, 'Has Orders'];
+                }
+
                 customerMap.set(rawPhone, existing);
             }
 
-            page++;
+            const lastPage = resJson?.data?.last_page ?? 1;
+            if (page >= lastPage) { hasMore = false; } else { page++; }
         } catch (err) {
-            console.error(`[Hyperzod Sync] Error on page ${page}:`, err.message);
+            console.error(`[Hyperzod Sync] Error on order page ${page}:`, err.message);
             break;
         }
     }
@@ -653,15 +714,14 @@ async function syncHyperzodCustomers(tenantId) {
     const customersList = Array.from(customerMap.values());
     localStore.saveCustomers(tenantId, customersList);
 
+    let totalSynced = 0;
     if (targetDb) {
         for (const customer of customersList) {
             try {
                 const { error } = await targetDb
                     .from('customers')
                     .upsert(customer, { onConflict: 'tenant_id,phone' });
-                if (!error) {
-                    totalSynced++;
-                } else {
+                if (!error) { totalSynced++; } else {
                     console.warn(`[Hyperzod Sync] DB warning for customer ${customer.phone}:`, error.message);
                 }
             } catch (dbErr) {
@@ -670,12 +730,14 @@ async function syncHyperzodCustomers(tenantId) {
         }
     }
 
-    console.log(`[Hyperzod Sync] Successfully synced ${customersList.length} customers for tenant ${tenantId}.`);
-    return { syncedCount: customersList.length, totalFound: customersList.length };
+    const withOrders = customersList.filter(c => c.total_orders > 0).length;
+    console.log(`[Hyperzod Sync] ✅ Synced ${customersList.length} total users (${withOrders} with orders) for tenant ${tenantId}.`);
+    return { syncedCount: customersList.length, totalFound: customersList.length, withOrders };
 }
 
 
 // Helper utilities
+
 function escapeRegExp(string) {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -2307,7 +2369,11 @@ app.get('/api/:tenantId/chats', async (req, res) => {
     const fetchAndMapChats = async () => {
         console.log(`[API] Calling client.getChats() for tenant ${tenantId}...`);
         try {
-            const chats = await client.getChats();
+            const getChatsPromise = client.getChats();
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('client.getChats() timeout (5s)')), 5000)
+            );
+            const chats = await Promise.race([getChatsPromise, timeoutPromise]);
             console.log(`[API] client.getChats() returned ${chats ? chats.length : 0} chats for tenant ${tenantId}`);
             if (chats && chats.length > 0) {
                 chats.slice(0, 100).forEach((chat) => {
