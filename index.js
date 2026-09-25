@@ -2530,7 +2530,7 @@ app.get('/api/:tenantId/chats', async (req, res) => {
                             chats = evalResult.chats;
                             console.log(`[API] Safe evaluate extracted ${chats.length} raw chats for tenant ${tenantId}`);
                         } else if (evalResult && evalResult.error) {
-                            console.log(`[API] Safe evaluate notice for ${tenantId}:`, evalResult.error, evalResult.chatStoreKeys || evalResult.storePresent || '');
+                            console.log(`[API] Safe evaluate notice for ${tenantId}:`, JSON.stringify(evalResult));
                         }
                     } catch (evalErr) {
                         console.warn(`[API] Direct evaluate warning for ${tenantId}:`, evalErr ? (evalErr.stack || evalErr.message || evalErr) : 'unknown error');
