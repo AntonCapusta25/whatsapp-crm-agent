@@ -1141,14 +1141,14 @@ class SessionManager {
             broadcastSSE({ type: 'status', tenantId, status: 'SYNCING' });
 
             // Fix for stuck SYNCING state
-            if (pct >= 99) {
+            if (pct >= 80 || client.info) {
                 setTimeout(() => {
                     if (this.statuses.get(tenantId) === 'SYNCING') {
                         console.log(`[Sessions] 🚀 Auto-reverting status to READY for tenant ${tenantId} after sync completion.`);
                         this.statuses.set(tenantId, 'READY');
                         broadcastSSE({ type: 'status', tenantId, status: 'READY' });
                     }
-                }, 3000);
+                }, 2000);
             }
         });
 
@@ -2199,7 +2199,8 @@ app.get('/api/:tenantId/chats', async (req, res) => {
 
     console.log(`[Chats] tenantId=${tenantId} client=${!!client} status=${status} sessions_keys=${JSON.stringify(Array.from(sessionManager.sessions.keys()))}`);
 
-    if (status !== 'READY' || !client) {
+    const isClientAvailable = client && (status === 'READY' || status === 'SYNCING' || status === 'AUTHENTICATED' || !!client.info);
+    if (!isClientAvailable) {
         return res.json({ success: true, chats: [], status, message: `WhatsApp client is not ready. Status: ${status}` });
     }
 

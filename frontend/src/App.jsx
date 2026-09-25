@@ -597,9 +597,9 @@ export default function App() {
     }
   };
 
-  // Auto-refresh chats list periodically once client is ready
+  // Auto-refresh chats list periodically once client is ready or syncing
   useEffect(() => {
-    if (status !== 'READY') return;
+    if (status !== 'READY' && status !== 'SYNCING' && status !== 'AUTHENTICATED') return;
     
     loadChats(); // Initial load
 
