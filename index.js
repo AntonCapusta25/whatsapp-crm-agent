@@ -2346,10 +2346,19 @@ app.get('/status', (req, res) => {
 // 3. Initialize/Boot session
 app.post('/api/:tenantId/initialize', async (req, res) => {
     const { tenantId } = req.params;
+    console.log(`[API] 🚀 Request POST /api/${tenantId}/initialize`);
     try {
-        await sessionManager.initializeSession(tenantId);
-        return res.json({ success: true, status: sessionManager.getStatus(tenantId) });
+        const currentStatus = sessionManager.getStatus(tenantId);
+        if (currentStatus === 'READY' || currentStatus === 'QR_READY' || currentStatus === 'SYNCING') {
+            return res.json({ success: true, status: currentStatus });
+        }
+        // Run session initialization asynchronously so HTTP response returns instantly
+        sessionManager.initializeSession(tenantId).catch(err => {
+            console.error(`[Sessions] ❌ Async initialize error for tenant ${tenantId}:`, err ? (err.stack || err.message || err) : 'unknown error');
+        });
+        return res.json({ success: true, status: sessionManager.getStatus(tenantId) || 'INITIALIZING' });
     } catch (err) {
+        console.error(`[API] Error processing initialize for tenant ${tenantId}:`, err);
         return res.status(500).json({ error: err.message });
     }
 });
