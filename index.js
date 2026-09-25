@@ -1342,13 +1342,6 @@ class SessionManager {
             this.statuses.set(tenantId, 'READY');
             this.qrTexts.delete(tenantId);
             broadcastSSE({ type: 'status', tenantId, status: 'READY' });
-
-            // Backup session to Supabase after 5s delay to let local files settle
-            setTimeout(() => {
-                saveSessionToSupabase(tenantId).catch(err => {
-                    console.error(`[Sessions] Error backing up session for tenant ${tenantId}:`, err.message);
-                });
-            }, 5000);
         });
 
         // Event: Incoming messages
