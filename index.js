@@ -1315,26 +1315,27 @@ class SessionManager {
 
         let lastPercent = 0;
         client.on('loading_screen', (percent, message) => {
+            const currentStat = this.statuses.get(tenantId);
+            if (currentStat === 'READY') {
+                return; // Already READY, ignore late loading_screen events
+            }
             const pct = parseInt(percent, 10);
             if (pct !== lastPercent) {
                 console.log(`[Sessions] ⏳ Syncing chats for tenant ${tenantId}: ${pct}% - ${message}`);
                 lastPercent = pct;
             }
-            this.statuses.set(tenantId, 'SYNCING');
+            const nextStatus = (pct >= 100 || client.info) ? 'READY' : 'SYNCING';
+            this.statuses.set(tenantId, nextStatus);
             this.syncPercents.set(tenantId, pct);
             this.syncMsgs.set(tenantId, message);
             broadcastSSE({ type: 'sync', tenantId, percent: pct, message });
-            broadcastSSE({ type: 'status', tenantId, status: 'SYNCING' });
+            broadcastSSE({ type: 'status', tenantId, status: nextStatus });
 
-            // Fix for stuck SYNCING state
             if (pct >= 80 || client.info) {
                 setTimeout(() => {
-                    if (this.statuses.get(tenantId) === 'SYNCING') {
-                        console.log(`[Sessions] 🚀 Auto-reverting status to READY for tenant ${tenantId} after sync completion.`);
-                        this.statuses.set(tenantId, 'READY');
-                        broadcastSSE({ type: 'status', tenantId, status: 'READY' });
-                    }
-                }, 2000);
+                    this.statuses.set(tenantId, 'READY');
+                    broadcastSSE({ type: 'status', tenantId, status: 'READY' });
+                }, 1000);
             }
         });
 

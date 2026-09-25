@@ -758,7 +758,12 @@ export default function App() {
       else if (data.type === 'sync') {
         setSyncPercent(data.percent);
         setSyncMsg(data.message);
-        setStatus('SYNCING');
+        if (data.percent >= 100) {
+          setStatus('READY');
+          loadChats();
+        } else if (status !== 'READY') {
+          setStatus('SYNCING');
+        }
       }
       else if (data.type === 'log') {
         const messageFrom = data.phone;
