@@ -2418,12 +2418,37 @@ app.get('/api/:tenantId/chats', async (req, res) => {
                 let chats = null;
                 if (client.pupPage && !client.pupPage.isClosed()) {
                     try {
-                        const isInjected = await client.pupPage.evaluate(() => typeof window.WWebJS !== 'undefined' && typeof window.WWebJS.getChats === 'function');
+                        const isInjected = await client.pupPage.evaluate(() => typeof window.WWebJS !== 'undefined');
                         if (!isInjected && typeof client.inject === 'function') {
                             console.log(`[API] 🔄 WWebJS script missing on page for ${tenantId}. Injecting WWebJS...`);
                             await client.inject();
                         }
                         chats = await client.pupPage.evaluate(() => {
+                            try {
+                                if (window.Store && window.Store.Chat && window.Store.Chat.models) {
+                                    return window.Store.Chat.models.slice(0, 100).map(c => {
+                                        let lastMsg = '';
+                                        let lastTime = c.t || c.timestamp || 0;
+                                        let fromMe = true;
+                                        if (c.msgs && c.msgs.models && c.msgs.models.length > 0) {
+                                            const lm = c.msgs.models[c.msgs.models.length - 1];
+                                            lastMsg = lm.body || lm.caption || '';
+                                            lastTime = lm.t || lm.timestamp || lastTime;
+                                            fromMe = lm.id ? (lm.id.fromMe ?? true) : true;
+                                        }
+                                        const idStr = c.id ? (c.id._serialized || c.id.user || String(c.id)) : '';
+                                        const nameStr = c.name || c.formattedTitle || (c.contact ? (c.contact.name || c.contact.pushname) : '') || idStr.split('@')[0];
+                                        return {
+                                            id: { _serialized: idStr, user: idStr.split('@')[0] },
+                                            name: nameStr,
+                                            timestamp: lastTime,
+                                            unreadCount: c.unreadCount || 0,
+                                            lastMessage: { body: lastMsg, timestamp: lastTime, fromMe }
+                                        };
+                                    }).filter(item => item.id._serialized);
+                                }
+                            } catch (e) {}
+
                             if (window.WWebJS && typeof window.WWebJS.getChats === 'function') {
                                 return window.WWebJS.getChats();
                             }
