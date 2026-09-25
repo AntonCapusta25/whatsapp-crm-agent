@@ -2422,27 +2422,42 @@ app.get('/api/:tenantId/chats', async (req, res) => {
                         }
                         chats = await client.pupPage.evaluate(() => {
                             try {
-                                if (window.Store && window.Store.Chat && window.Store.Chat.models) {
-                                    return window.Store.Chat.models.slice(0, 100).map(c => {
+                                const chatModels = (window.Store && window.Store.Chat && window.Store.Chat.models)
+                                    ? window.Store.Chat.models
+                                    : (window.Store && window.Store.Chat && typeof window.Store.Chat.getModelsArray === 'function' ? window.Store.Chat.getModelsArray() : null);
+
+                                if (chatModels && Array.isArray(chatModels)) {
+                                    return chatModels.slice(0, 100).map(c => {
                                         let lastMsg = '';
                                         let lastTime = c.t || c.timestamp || 0;
                                         let fromMe = true;
-                                        if (c.msgs && c.msgs.models && c.msgs.models.length > 0) {
-                                            const lm = c.msgs.models[c.msgs.models.length - 1];
-                                            lastMsg = lm.body || lm.caption || '';
-                                            lastTime = lm.t || lm.timestamp || lastTime;
-                                            fromMe = lm.id ? (lm.id.fromMe ?? true) : true;
-                                        }
-                                        const idStr = c.id ? (c.id._serialized || c.id.user || String(c.id)) : '';
-                                        const nameStr = c.name || c.formattedTitle || (c.contact ? (c.contact.name || c.contact.pushname) : '') || idStr.split('@')[0];
+                                        try {
+                                            const lm = c.lastMessage || (c.msgs && typeof c.msgs.last === 'function' ? c.msgs.last() : null) || (c.msgs && c.msgs.models && c.msgs.models.length > 0 ? c.msgs.models[c.msgs.models.length - 1] : null);
+                                            if (lm) {
+                                                lastMsg = lm.body || lm.caption || '';
+                                                lastTime = lm.t || lm.timestamp || lastTime;
+                                                fromMe = lm.id ? (lm.id.fromMe ?? true) : true;
+                                            }
+                                        } catch (e) {}
+
+                                        let idStr = '';
+                                        try {
+                                            idStr = c.id ? (c.id._serialized || c.id.user || String(c.id)) : '';
+                                        } catch (e) {}
+
+                                        let nameStr = '';
+                                        try {
+                                            nameStr = c.name || c.formattedTitle || (c.contact ? (c.contact.name || c.contact.pushname) : '') || (idStr ? idStr.split('@')[0] : '');
+                                        } catch (e) {}
+
                                         return {
-                                            id: { _serialized: idStr, user: idStr.split('@')[0] },
-                                            name: nameStr,
+                                            id: { _serialized: idStr, user: idStr ? idStr.split('@')[0] : '' },
+                                            name: nameStr || idStr,
                                             timestamp: lastTime,
                                             unreadCount: c.unreadCount || 0,
                                             lastMessage: { body: lastMsg, timestamp: lastTime, fromMe }
                                         };
-                                    }).filter(item => item.id._serialized);
+                                    }).filter(item => item && item.id && item.id._serialized);
                                 }
                             } catch (e) {}
 
