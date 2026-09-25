@@ -3158,6 +3158,7 @@ app.post('/api/:tenantId/suggest-response', async (req, res) => {
         return res.status(503).json({ error: 'WhatsApp client is not ready.' });
     }
 
+    try {
         let msgs = await fetchChatMessagesDirect(client, jid, 10);
         if (!msgs || msgs.length === 0) {
             try {
