@@ -2353,7 +2353,6 @@ app.post('/api/:tenantId/config', async (req, res) => {
     return res.json({ success: true });
 });
 
-// 7. Fetch active chats list
 app.get('/api/:tenantId/chats', async (req, res) => {
     const { tenantId } = req.params;
     const client = await sessionManager.getClient(tenantId);
@@ -2361,9 +2360,38 @@ app.get('/api/:tenantId/chats', async (req, res) => {
 
     console.log(`[Chats] tenantId=${tenantId} client=${!!client} status=${status} sessions_keys=${JSON.stringify(Array.from(sessionManager.sessions.keys()))}`);
 
-    const isClientAvailable = client && (status === 'READY' || status === 'SYNCING' || status === 'AUTHENTICATED' || !!client.info);
+    // Populate from local store customers if knownChats is empty
+    let chatList = sessionManager.getKnownChats(tenantId);
+    if (chatList.length === 0) {
+        try {
+            const customers = localStore.getCustomers(tenantId);
+            if (customers && customers.length > 0) {
+                customers.forEach(c => {
+                    const rawPhone = c.phone || c.whatsapp_phone || c.id;
+                    const sanitized = sanitizePhone(rawPhone);
+                    if (sanitized && sanitized.length >= 7) {
+                        const jid = `${sanitized}@c.us`;
+                        sessionManager.updateKnownChat(
+                            tenantId,
+                            jid,
+                            c.name || sanitized,
+                            c.total_orders > 0 ? `Orders: ${c.total_orders}` : '',
+                            Math.floor(Date.now() / 1000),
+                            false,
+                            0
+                        );
+                    }
+                });
+                chatList = sessionManager.getKnownChats(tenantId);
+            }
+        } catch (err) {
+            console.warn(`[Chats] Error pre-populating knownChats from localStore for ${tenantId}:`, err.message);
+        }
+    }
+
+    const isClientAvailable = client && (status === 'READY' || !!client.info);
     if (!isClientAvailable) {
-        return res.json({ success: true, chats: [], status, message: `WhatsApp client is not ready. Status: ${status}` });
+        return res.json({ success: true, chats: chatList, status, message: `WhatsApp client is not ready. Status: ${status}` });
     }
 
     const fetchAndMapChats = async () => {
@@ -2400,33 +2428,16 @@ app.get('/api/:tenantId/chats', async (req, res) => {
             console.warn(`[API] Warning calling client.getChats() for ${tenantId}:`, e.message);
         }
 
-        // Auto-promote status to READY once chats are fetched
-        if (sessionManager.statuses.get(tenantId) !== 'READY') {
-            sessionManager.statuses.set(tenantId, 'READY');
-            broadcastSSE({ type: 'status', tenantId, status: 'READY' });
-        }
-
         return sessionManager.getKnownChats(tenantId);
     };
 
     try {
         console.log(`[API] Fetching all active chats for tenant: ${tenantId}`);
-        const chatList = await fetchAndMapChats();
+        chatList = await fetchAndMapChats();
         return res.json({ success: true, chats: chatList, status });
     } catch (err) {
         console.error(`[API] Error fetching chats for ${tenantId}:`, err.message);
-        if (client && client.pupPage && (err.message.includes('detached Frame') || err.message.includes('Execution context was destroyed') || err.message.includes('detached frame'))) {
-            console.log('[API] 🔄 Detached frame detected. Re-syncing page...');
-            try {
-                await client.pupPage.reload({ waitUntil: 'networkidle2' });
-                await new Promise(resolve => setTimeout(resolve, 3000));
-                const chatList = await fetchAndMapChats();
-                return res.json({ success: true, chats: chatList, status });
-            } catch (recoveryErr) {
-                console.error('[API] Recovery failed:', recoveryErr.message);
-            }
-        }
-        return res.json({ success: true, chats: [], status, warning: err.message });
+        return res.json({ success: true, chats: chatList, status, warning: err.message });
     }
 });
 
