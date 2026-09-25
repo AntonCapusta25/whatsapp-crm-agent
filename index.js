@@ -2418,6 +2418,11 @@ app.get('/api/:tenantId/chats', async (req, res) => {
                 let chats = null;
                 if (client.pupPage && !client.pupPage.isClosed()) {
                     try {
+                        const isInjected = await client.pupPage.evaluate(() => typeof window.WWebJS !== 'undefined' && typeof window.WWebJS.getChats === 'function');
+                        if (!isInjected && typeof client.inject === 'function') {
+                            console.log(`[API] 🔄 WWebJS script missing on page for ${tenantId}. Injecting WWebJS...`);
+                            await client.inject();
+                        }
                         chats = await client.pupPage.evaluate(() => {
                             if (window.WWebJS && typeof window.WWebJS.getChats === 'function') {
                                 return window.WWebJS.getChats();
