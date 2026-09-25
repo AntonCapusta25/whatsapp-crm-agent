@@ -2181,20 +2181,14 @@ app.get('/api/:tenantId/chats', async (req, res) => {
 
     console.log(`[Chats] tenantId=${tenantId} client=${!!client} status=${status} sessions_keys=${JSON.stringify(Array.from(sessionManager.sessions.keys()))}`);
 
-    if (status !== 'READY') {
-        return res.status(503).json({ error: 'WhatsApp client is not ready. Status: ' + status, status });
-    }
-
-    // If status is READY but client lookup failed, try all session keys
-    const resolvedClient = client || Array.from(sessionManager.sessions.values())[0];
-    if (!resolvedClient) {
-        return res.status(503).json({ error: 'No active client found.', status });
+    if (status !== 'READY' || !client) {
+        return res.json({ success: true, chats: [], status, message: `WhatsApp client is not ready. Status: ${status}` });
     }
 
     const fetchAndMapChats = async () => {
-        console.log(`[API] Calling resolvedClient.getChats() for tenant ${tenantId}...`);
-        const chats = await resolvedClient.getChats();
-        console.log(`[API] resolvedClient.getChats() returned ${chats ? chats.length : 0} chats for tenant ${tenantId}`);
+        console.log(`[API] Calling client.getChats() for tenant ${tenantId}...`);
+        const chats = await client.getChats();
+        console.log(`[API] client.getChats() returned ${chats ? chats.length : 0} chats for tenant ${tenantId}`);
         if (!chats || chats.length === 0) {
             return [];
         }
@@ -2237,23 +2231,21 @@ app.get('/api/:tenantId/chats', async (req, res) => {
     try {
         console.log(`[API] Fetching all active chats for tenant: ${tenantId}`);
         const chatList = await fetchAndMapChats();
-        return res.json({ success: true, chats: chatList });
+        return res.json({ success: true, chats: chatList, status });
     } catch (err) {
         console.error(`[API] Error fetching chats for ${tenantId}:`, err.message);
-        if (err.message.includes('detached Frame') || err.message.includes('Execution context was destroyed') || err.message.includes('detached frame')) {
+        if (client && client.pupPage && (err.message.includes('detached Frame') || err.message.includes('Execution context was destroyed') || err.message.includes('detached frame'))) {
             console.log('[API] 🔄 Detached frame detected. Re-syncing page...');
             try {
-                if (client.pupPage) {
-                    await client.pupPage.reload({ waitUntil: 'networkidle2' });
-                    await new Promise(resolve => setTimeout(resolve, 3000));
-                    const chatList = await fetchAndMapChats();
-                    return res.json({ success: true, chats: chatList });
-                }
+                await client.pupPage.reload({ waitUntil: 'networkidle2' });
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                const chatList = await fetchAndMapChats();
+                return res.json({ success: true, chats: chatList, status });
             } catch (recoveryErr) {
                 console.error('[API] Recovery failed:', recoveryErr.message);
             }
         }
-        return res.status(500).json({ error: err.message });
+        return res.json({ success: true, chats: [], status, warning: err.message });
     }
 });
 
@@ -2284,7 +2276,7 @@ app.get('/api/:tenantId/customers', async (req, res) => {
     const { tag, search } = req.query;
     try {
         const db = (await getCrmSupabase(tenantId)) || supabase;
-        if (!db) return res.status(500).json({ error: 'No database connection available' });
+        if (!db) return res.json({ success: true, customers: [], warning: 'No database connection available' });
 
         let query = db.from('customers').select('*').eq('tenant_id', tenantId);
 
@@ -2296,11 +2288,14 @@ app.get('/api/:tenantId/customers', async (req, res) => {
         }
 
         const { data, error } = await query.order('last_order_at', { ascending: false, nullsFirst: false });
-        if (error) throw error;
+        if (error) {
+            console.warn(`[Customers API] Query warning for tenant ${tenantId}:`, error.message);
+            return res.json({ success: true, customers: [], warning: error.message });
+        }
         return res.json({ success: true, customers: data || [] });
     } catch (e) {
-        console.error(`[Customers API] Error fetching customers for tenant ${tenantId}:`, e.message);
-        return res.status(500).json({ error: e.message });
+        console.warn(`[Customers API] Error fetching customers for tenant ${tenantId}:`, e.message);
+        return res.json({ success: true, customers: [], warning: e.message });
     }
 });
 

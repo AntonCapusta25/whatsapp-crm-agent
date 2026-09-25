@@ -555,6 +555,8 @@ export default function App() {
 
   useEffect(() => {
     if (isAuthenticated) {
+      localStorage.setItem('whatsapp_tenant_id', tenantId);
+      setStatus('INITIALIZING');
       loadBrainConfig();
     }
   }, [tenantId, isAuthenticated]);
