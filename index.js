@@ -2360,38 +2360,9 @@ app.get('/api/:tenantId/chats', async (req, res) => {
 
     console.log(`[Chats] tenantId=${tenantId} client=${!!client} status=${status} sessions_keys=${JSON.stringify(Array.from(sessionManager.sessions.keys()))}`);
 
-    // Populate from local store customers if knownChats is empty
-    let chatList = sessionManager.getKnownChats(tenantId);
-    if (chatList.length === 0) {
-        try {
-            const customers = localStore.getCustomers(tenantId);
-            if (customers && customers.length > 0) {
-                customers.forEach(c => {
-                    const rawPhone = c.phone || c.whatsapp_phone || c.id;
-                    const sanitized = sanitizePhone(rawPhone);
-                    if (sanitized && sanitized.length >= 7) {
-                        const jid = `${sanitized}@c.us`;
-                        sessionManager.updateKnownChat(
-                            tenantId,
-                            jid,
-                            c.name || sanitized,
-                            c.total_orders > 0 ? `Orders: ${c.total_orders}` : '',
-                            Math.floor(Date.now() / 1000),
-                            false,
-                            0
-                        );
-                    }
-                });
-                chatList = sessionManager.getKnownChats(tenantId);
-            }
-        } catch (err) {
-            console.warn(`[Chats] Error pre-populating knownChats from localStore for ${tenantId}:`, err.message);
-        }
-    }
-
-    const isClientAvailable = client && (status === 'READY' || !!client.info);
+    const isClientAvailable = client && (status === 'READY' || status === 'SYNCING' || status === 'AUTHENTICATED' || !!client.info);
     if (!isClientAvailable) {
-        return res.json({ success: true, chats: chatList, status, message: `WhatsApp client is not ready. Status: ${status}` });
+        return res.json({ success: true, chats: sessionManager.getKnownChats(tenantId), status, message: `WhatsApp client is not ready. Status: ${status}` });
     }
 
     const fetchAndMapChats = async () => {
@@ -2399,7 +2370,7 @@ app.get('/api/:tenantId/chats', async (req, res) => {
         try {
             const getChatsPromise = client.getChats();
             const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('client.getChats() timeout (5s)')), 5000)
+                setTimeout(() => reject(new Error('client.getChats() timeout (15s)')), 15000)
             );
             const chats = await Promise.race([getChatsPromise, timeoutPromise]);
             console.log(`[API] client.getChats() returned ${chats ? chats.length : 0} chats for tenant ${tenantId}`);
@@ -2433,11 +2404,11 @@ app.get('/api/:tenantId/chats', async (req, res) => {
 
     try {
         console.log(`[API] Fetching all active chats for tenant: ${tenantId}`);
-        chatList = await fetchAndMapChats();
+        const chatList = await fetchAndMapChats();
         return res.json({ success: true, chats: chatList, status });
     } catch (err) {
         console.error(`[API] Error fetching chats for ${tenantId}:`, err.message);
-        return res.json({ success: true, chats: chatList, status, warning: err.message });
+        return res.json({ success: true, chats: sessionManager.getKnownChats(tenantId), status, warning: err.message });
     }
 });
 
