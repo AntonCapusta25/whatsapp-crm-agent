@@ -1154,6 +1154,7 @@ class SessionManager {
         this.queues = new Map();           // tenantId -> Array
         this.isProcessingQueue = new Map(); // tenantId -> boolean
         this.knownChats = new Map();       // tenantId -> Map(jid -> chatObj)
+        this.qrTimeouts = new Map();       // tenantId -> Timeout
     }
 
     updateKnownChat(tenantId, jid, name, lastMessage, timestamp, fromMe, unreadCount = 0) {
@@ -1270,10 +1271,32 @@ class SessionManager {
             this.qrTexts.set(tenantId, qr);
             broadcastSSE({ type: 'qr', tenantId, qr });
             broadcastSSE({ type: 'status', tenantId, status: 'QR_READY' });
+
+            if (!this.qrTimeouts.has(tenantId)) {
+                const timer = setTimeout(async () => {
+                    if (this.statuses.get(tenantId) === 'QR_READY') {
+                        console.log(`[Sessions] 💤 Closing idle QR session for tenant ${tenantId} after 60s inactivity to free CPU/RAM.`);
+                        try {
+                            const cl = this.sessions.get(tenantId);
+                            if (cl) await cl.destroy();
+                        } catch (e) {}
+                        this.sessions.delete(tenantId);
+                        this.statuses.set(tenantId, 'DISCONNECTED');
+                        this.qrTexts.delete(tenantId);
+                        this.qrTimeouts.delete(tenantId);
+                        broadcastSSE({ type: 'status', tenantId, status: 'DISCONNECTED' });
+                    }
+                }, 60000);
+                this.qrTimeouts.set(tenantId, timer);
+            }
         });
 
         client.on('authenticated', () => {
             console.log(`[Sessions] ✅ Client authenticated successfully for tenant: ${tenantId}`);
+            if (this.qrTimeouts.has(tenantId)) {
+                clearTimeout(this.qrTimeouts.get(tenantId));
+                this.qrTimeouts.delete(tenantId);
+            }
             this.statuses.set(tenantId, 'AUTHENTICATED');
             this.qrTexts.delete(tenantId);
             broadcastSSE({ type: 'status', tenantId, status: 'AUTHENTICATED' });
