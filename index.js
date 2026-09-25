@@ -2912,6 +2912,97 @@ async function mapMessagesWithMedia(messages) {
     }));
 }
 
+// Helper: Directly extract chat messages from window.Store without triggering WWebJS minified error r
+async function fetchChatMessagesDirect(client, jid, limit = 100) {
+    if (!client.pupPage || client.pupPage.isClosed()) return [];
+
+    try {
+        const result = await client.pupPage.evaluate(async (chatId, limitCount) => {
+            try {
+                let chatStore = window.Store.Chat;
+                if (chatStore) {
+                    if (chatStore.ChatCollection) chatStore = chatStore.ChatCollection;
+                    else if (chatStore.ChatCollectionImpl) chatStore = chatStore.ChatCollectionImpl;
+                    else if (chatStore.default) chatStore = chatStore.default;
+                }
+                if ((!chatStore || typeof chatStore !== 'object') && window.Store.ChatCollection) {
+                    chatStore = window.Store.ChatCollection;
+                }
+
+                let chat = null;
+                if (chatStore && typeof chatStore.get === 'function') {
+                    try { chat = chatStore.get(chatId); } catch (e) {}
+                }
+                if (!chat && chatStore) {
+                    const list = chatStore._models || chatStore.models || (typeof chatStore.toArray === 'function' ? chatStore.toArray() : []);
+                    if (Array.isArray(list)) {
+                        chat = list.find(c => {
+                            const idStr = c.id ? (c.id._serialized || c.id.user || '') : '';
+                            return idStr === chatId || idStr.includes(chatId) || chatId.includes(idStr);
+                        });
+                    }
+                }
+
+                if (!chat) return { notFound: true, msgs: [] };
+
+                if (chat.msgs && typeof chat.msgs.loadEarlierMsgs === 'function') {
+                    try { await chat.msgs.loadEarlierMsgs(); } catch (e) {}
+                }
+
+                let msgs = [];
+                if (chat.msgs) {
+                    if (typeof chat.msgs.getModelsArray === 'function') {
+                        try { msgs = chat.msgs.getModelsArray(); } catch (e) {}
+                    }
+                    if (!msgs || msgs.length === 0) {
+                        msgs = chat.msgs._models || chat.msgs.models || [];
+                    }
+                }
+
+                if (!Array.isArray(msgs)) return { msgs: [] };
+
+                const mapped = msgs.slice(-limitCount).map(m => {
+                    if (!m) return null;
+                    const idStr = m.id ? (m.id._serialized || m.id.id || '') : '';
+                    const fromMe = m.id ? (m.id.fromMe ?? false) : false;
+                    let body = m.body || m.caption || '';
+                    if (!body && m.type) {
+                        if (m.type === 'image') body = '📷 Photo';
+                        else if (m.type === 'video') body = '📹 Video';
+                        else if (m.type === 'audio' || m.type === 'ptt') body = '🎵 Audio';
+                        else if (m.type === 'document') body = '📄 Document';
+                        else if (m.type === 'sticker') body = 'Sticker';
+                    }
+                    const timestamp = m.t || m.timestamp || Math.floor(Date.now() / 1000);
+
+                    return {
+                        id: idStr,
+                        from: m.from ? (m.from._serialized || m.from) : (fromMe ? 'me' : chatId),
+                        to: m.to ? (m.to._serialized || m.to) : (fromMe ? chatId : 'me'),
+                        fromMe: fromMe,
+                        body: body,
+                        type: m.type || 'chat',
+                        timestamp: timestamp,
+                        hasMedia: !!(m.isMedia || m.mimetype),
+                        mediaUrl: m.clientUrl || null
+                    };
+                }).filter(Boolean);
+
+                return { msgs: mapped };
+            } catch (err) {
+                return { error: String(err && err.stack ? err.stack : err), msgs: [] };
+            }
+        }, jid, limit);
+
+        if (result && Array.isArray(result.msgs)) {
+            return result.msgs;
+        }
+    } catch (e) {
+        console.warn(`[API] fetchChatMessagesDirect error for ${jid}:`, e.message || e);
+    }
+    return [];
+}
+
 // 8. Fetch message history by raw JID
 app.get('/api/:tenantId/history/jid/:jid', async (req, res) => {
     const { tenantId, jid } = req.params;
@@ -2922,32 +3013,24 @@ app.get('/api/:tenantId/history/jid/:jid', async (req, res) => {
         return res.status(503).json({ error: 'WhatsApp client is not ready. Status: ' + status });
     }
 
-    const fetchHistory = async () => {
-        const chat = await client.getChatById(jid);
-        const messages = await chat.fetchMessages({ limit: 300 });
-        return mapMessagesWithMedia(messages);
-    };
-
     try {
         console.log(`[API] Fetching history for direct JID ${jid} on tenant ${tenantId}`);
-        const history = await fetchHistory();
-        return res.json({ success: true, messages: history });
-    } catch (err) {
-        console.error(`[API] Error fetching JID history for ${tenantId}:`, err.message);
-        if (err.message.includes('detached Frame') || err.message.includes('Execution context was destroyed') || err.message.includes('detached frame')) {
-            console.log('[API] 🔄 Detached frame detected in history fetch. Recovering Puppeteer...');
+        let history = await fetchChatMessagesDirect(client, jid, 100);
+
+        if (!history || history.length === 0) {
             try {
-                if (client.pupPage) {
-                    await client.pupPage.reload({ waitUntil: 'networkidle2' });
-                    await new Promise(resolve => setTimeout(resolve, 3000));
-                    const history = await fetchHistory();
-                    return res.json({ success: true, messages: history });
-                }
-            } catch (recoveryErr) {
-                console.error('[API] Recovery failed:', recoveryErr.message);
+                const chat = await client.getChatById(jid);
+                const messages = await chat.fetchMessages({ limit: 100 });
+                history = await mapMessagesWithMedia(messages);
+            } catch (fallbackErr) {
+                console.warn(`[API] Fallback getChatById for ${jid}:`, fallbackErr.message || fallbackErr);
             }
         }
-        return res.status(500).json({ error: err.message });
+
+        return res.json({ success: true, messages: history || [] });
+    } catch (err) {
+        console.error(`[API] Error fetching JID history for ${tenantId}:`, err.message);
+        return res.json({ success: true, messages: [] });
     }
 });
 
@@ -2974,15 +3057,20 @@ app.get('/api/:tenantId/history/:phone', async (req, res) => {
         }
 
         const chatId = numberDetails ? numberDetails._serialized : `${sanitizedPhone}@c.us`;
-        const chat = await client.getChatById(chatId);
-        const messages = await chat.fetchMessages({ limit: 300 });
+        let history = await fetchChatMessagesDirect(client, chatId, 100);
 
-        const messageHistory = await mapMessagesWithMedia(messages);
+        if (!history || history.length === 0) {
+            try {
+                const chat = await client.getChatById(chatId);
+                const messages = await chat.fetchMessages({ limit: 100 });
+                history = await mapMessagesWithMedia(messages);
+            } catch (fallbackErr) {}
+        }
 
-        return res.json({ success: true, messages: messageHistory });
+        return res.json({ success: true, messages: history || [] });
     } catch (err) {
         console.error(`[API] Error fetching history for ${phone}:`, err.message);
-        return res.status(500).json({ error: err.message });
+        return res.json({ success: true, messages: [] });
     }
 });
 
@@ -3070,11 +3158,15 @@ app.post('/api/:tenantId/suggest-response', async (req, res) => {
         return res.status(503).json({ error: 'WhatsApp client is not ready.' });
     }
 
-    try {
-        const chat = await client.getChatById(jid);
-        const msgs = await chat.fetchMessages({ limit: 10 });
+        let msgs = await fetchChatMessagesDirect(client, jid, 10);
+        if (!msgs || msgs.length === 0) {
+            try {
+                const chat = await client.getChatById(jid);
+                msgs = await chat.fetchMessages({ limit: 10 });
+            } catch (fallbackErr) {}
+        }
 
-        if (msgs.length > 0 && msgs[msgs.length - 1].fromMe) {
+        if (msgs && msgs.length > 0 && msgs[msgs.length - 1].fromMe) {
             return res.json({
                 success: true,
                 suggestedMessage: 'You already replied to this message.',
@@ -3083,7 +3175,7 @@ app.post('/api/:tenantId/suggest-response', async (req, res) => {
             });
         }
 
-        const lastMsgBody = msgs.length > 0 ? msgs[msgs.length - 1].body : '';
+        const lastMsgBody = (msgs && msgs.length > 0) ? (msgs[msgs.length - 1].body || '') : '';
         const config = await getBrainConfig(tenantId);
         const hasApiKey = process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY || (config.aiAgent && config.aiAgent.apiKey);
 

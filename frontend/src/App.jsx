@@ -885,7 +885,32 @@ export default function App() {
   const formatTime = (timestamp) => {
     if (!timestamp) return '';
     const date = new Date(timestamp * 1000);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const now = new Date();
+    const isToday = date.toDateString() === now.toDateString();
+    
+    const yesterday = new Date();
+    yesterday.setDate(now.getDate() - 1);
+    const isYesterday = date.toDateString() === yesterday.toDateString();
+
+    const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    if (isToday) {
+      return timeStr;
+    }
+    if (isYesterday) {
+      return `Yesterday, ${timeStr}`;
+    }
+    
+    const diffDays = Math.round((now - date) / (1000 * 60 * 60 * 24));
+    if (diffDays < 7 && diffDays > 0) {
+      const dayName = date.toLocaleDateString([], { weekday: 'short' });
+      return `${dayName}, ${timeStr}`;
+    }
+
+    if (date.getFullYear() === now.getFullYear()) {
+      return `${date.toLocaleDateString([], { day: 'numeric', month: 'short' })}, ${timeStr}`;
+    }
+    return `${date.toLocaleDateString([], { day: 'numeric', month: 'short', year: '2-digit' })}, ${timeStr}`;
   };
 
   return (
