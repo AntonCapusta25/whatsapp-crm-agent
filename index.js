@@ -1184,6 +1184,9 @@ class SessionManager {
     }
 
     async getClient(tenantId) {
+        if (!this.sessions.has(tenantId)) {
+            await this.initializeSession(tenantId);
+        }
         return this.sessions.get(tenantId);
     }
 
@@ -2254,22 +2257,29 @@ async function autoStartAllTenants() {
         }
     }
 
-    console.log(`[Startup] 🚀 Auto-booting all known tenants: [${Array.from(tenants).join(', ')}]`);
+    // Filter tenants: only auto-boot tenants with existing saved session data locally to prevent spawning idle QR Chrome instances
+    const activeTenants = [];
+    for (const tenantId of tenants) {
+        const sessionPath = path.join(__dirname, '.wwebjs_auth', `session-tenant-${tenantId}`);
+        if (fs.existsSync(sessionPath)) {
+            activeTenants.push(tenantId);
+        }
+    }
+
+    console.log(`[Startup] 🚀 Auto-booting active saved tenants (${activeTenants.length}/${tenants.size}): [${activeTenants.join(', ')}]`);
 
     // Initialize sessions sequentially to prevent overloading CPU/memory on cold boots
-    // IMPORTANT: We await each session to fully initialize before starting the next one
-    for (const tenantId of tenants) {
+    for (const tenantId of activeTenants) {
         try {
             console.log(`[Startup] ⏳ Booting tenant session: ${tenantId}`);
             await sessionManager.initializeSession(tenantId);
         } catch (err) {
             console.error(`[Startup] Failed to boot tenant session for ${tenantId}:`, err.message);
         }
-        // Wait 10s between tenant boots to let Chromium settle and free up memory
-        console.log(`[Startup] ⏸️ Waiting 10s before next tenant boot...`);
-        await new Promise(resolve => setTimeout(resolve, 10000));
+        console.log(`[Startup] ⏸️ Waiting 5s before next tenant boot...`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
     }
-    console.log(`[Startup] ✅ Finished auto-booting all tenant sessions.`);
+    console.log(`[Startup] ✅ Finished auto-booting active tenant sessions.`);
 }
 
 // Call startup auto-start handler
