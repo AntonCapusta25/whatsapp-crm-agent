@@ -2425,13 +2425,22 @@ app.get('/api/:tenantId/chats', async (req, res) => {
                 let chats = null;
                 if (client.pupPage && !client.pupPage.isClosed()) {
                     try {
-                        const isInjected = await client.pupPage.evaluate(() => typeof window.WWebJS !== 'undefined');
-                        if (!isInjected && typeof client.inject === 'function') {
-                            console.log(`[API] 🔄 WWebJS script missing on page for ${tenantId}. Injecting WWebJS...`);
+                        const hasStore = await client.pupPage.evaluate(() => typeof window.Store !== 'undefined' && typeof window.Store.Chat !== 'undefined');
+                        if (!hasStore && typeof client.inject === 'function') {
+                            console.log(`[API] 🔄 window.Store.Chat missing on page for ${tenantId}. Injecting WWebJS...`);
                             await client.inject();
                         }
                         const evalResult = await client.pupPage.evaluate(() => {
                             try {
+                                if (!window.Store || !window.Store.Chat) {
+                                    if (typeof window.require === 'function') {
+                                        try {
+                                            window.Store = window.Store || {};
+                                            const chatMod = window.require('WAWebChatCollection');
+                                            if (chatMod) window.Store.Chat = chatMod.Chat || chatMod.default || chatMod;
+                                        } catch(e) {}
+                                    }
+                                }
                                 if (!window.Store || !window.Store.Chat) {
                                     return { error: 'Store or Store.Chat not available', storePresent: !!window.Store };
                                 }
