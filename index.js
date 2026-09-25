@@ -2455,18 +2455,28 @@ app.get('/api/:tenantId/chats', async (req, res) => {
                                 }
                                 const chatStore = window.Store.Chat;
                                 let list = null;
-                                if (Array.isArray(chatStore.models)) {
-                                    list = chatStore.models;
-                                } else if (Array.isArray(chatStore._models)) {
+                                if (Array.isArray(chatStore._models)) {
                                     list = chatStore._models;
+                                } else if (Array.isArray(chatStore.models)) {
+                                    list = chatStore.models;
+                                } else if (typeof chatStore.toArray === 'function') {
+                                    try { list = chatStore.toArray(); } catch(e) {}
+                                } else if (typeof chatStore.toJSON === 'function') {
+                                    try { list = chatStore.toJSON(); } catch(e) {}
                                 } else if (typeof chatStore.getModelsArray === 'function') {
                                     try { list = chatStore.getModelsArray(); } catch(e) {}
+                                } else if (chatStore._modelsMap && typeof chatStore._modelsMap === 'object') {
+                                    list = Object.values(chatStore._modelsMap);
+                                } else if (chatStore._index && typeof chatStore._index === 'object') {
+                                    list = Object.values(chatStore._index);
                                 } else if (chatStore.models && Array.isArray(chatStore.models._models)) {
                                     list = chatStore.models._models;
                                 }
 
                                 if (!list || !Array.isArray(list)) {
-                                    return { error: 'Could not extract models array', chatStoreKeys: Object.keys(chatStore) };
+                                    const ownProps = Object.getOwnPropertyNames(chatStore);
+                                    const protoProps = Object.getPrototypeOf(chatStore) ? Object.getOwnPropertyNames(Object.getPrototypeOf(chatStore)) : [];
+                                    return { error: 'Could not extract models array', ownProps, protoProps, keys: Object.keys(chatStore) };
                                 }
 
                                 const mapped = list.slice(0, 100).map(c => {
