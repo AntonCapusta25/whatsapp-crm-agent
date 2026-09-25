@@ -264,6 +264,7 @@ export default function App() {
   const [loadingSuggestion, setLoadingSuggestion] = useState(false);
   const [brainConfig, setBrainConfig] = useState({
     profileName: '',
+    enabledTabs: { chats: true, customers: true, caterings: true },
     crmSettings: { enabled: false, url: '', key: '' },
     hyperzodSettings: { enabled: false, apiKey: '', tenantId: '' },
     welcomeMessage: { enabled: false, template: '' },
@@ -272,6 +273,10 @@ export default function App() {
     webhook: { enabled: false, url: '' },
     emailNotification: { enabled: false, apiKey: '', fromEmail: '', toEmail: '', subject: '' }
   });
+
+  const [showNewWorkspaceModal, setShowNewWorkspaceModal] = useState(false);
+  const [newWorkspaceName, setNewWorkspaceName] = useState('');
+  const [newWorkspacePreset, setNewWorkspacePreset] = useState('hyperzod');
 
   const [customers, setCustomers] = useState([]);
   const [loadingCustomers, setLoadingCustomers] = useState(false);
@@ -376,6 +381,57 @@ export default function App() {
       alert('Network error sending segment broadcast: ' + e.message);
     } finally {
       setIsSendingSegmentBroadcast(false);
+    }
+  };
+
+  const handleCreateWorkspace = async () => {
+    if (!newWorkspaceName.trim()) {
+      alert('Please enter a workspace name');
+      return;
+    }
+    const rawName = newWorkspaceName.trim();
+    const slug = rawName.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-');
+    if (tenantsList.some(t => t.id === slug)) {
+      alert(`Workspace ID "${slug}" already exists!`);
+      return;
+    }
+
+    let initialTabs = { chats: true, customers: true, caterings: false };
+    if (newWorkspacePreset === 'catering') {
+      initialTabs = { chats: true, customers: true, caterings: true };
+    } else if (newWorkspacePreset === 'crm') {
+      initialTabs = { chats: true, customers: true, caterings: false };
+    }
+
+    const initialConfig = {
+      profileName: rawName,
+      enabledTabs: initialTabs,
+      hyperzodSettings: { enabled: newWorkspacePreset === 'hyperzod', apiKey: '', tenantId: '' },
+      crmSettings: { enabled: false, url: '', key: '' }
+    };
+
+    try {
+      await apiFetch(`/api/${slug}/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(initialConfig)
+      });
+
+      setTenantsList(prev => [...prev, { id: slug, name: rawName, status: 'INITIALIZING', enabledTabs: initialTabs }]);
+      setTenantId(slug);
+      setActiveChat(null);
+      setMessages([]);
+      setCrmContext(null);
+      setCrmType('');
+      setChats([]);
+      setCustomers([]);
+      setShowNewWorkspaceModal(false);
+      setNewWorkspaceName('');
+
+      // Auto-initialize WhatsApp session for new workspace
+      await apiFetch(`/api/${slug}/initialize`, { method: 'POST' });
+    } catch (e) {
+      alert('Error creating workspace: ' + e.message);
     }
   };
 
@@ -884,87 +940,165 @@ export default function App() {
       {/* Sidebar */}
       <div className="sidebar">
         {/* Top Header & Navigation Dashboard */}
-        {/* Top Header - Ultra Minimal */}
-        <div className="sidebar-header" style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', padding: '1rem', borderBottom: '1px solid var(--border-color)', background: 'var(--panel-bg)', minHeight: 'auto', height: 'auto' }}>
-          {/* Row 1: Agent Identity & Status */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div className="user-profile" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <div className="avatar" style={{ background: 'linear-gradient(135deg, #00a884 0%, #128c7e 100%)', width: '38px', height: '38px', minWidth: '38px', minHeight: '38px', display: 'flex', justifyContent: 'center', alignItems: 'center', color: 'white', borderRadius: '50%', fontSize: '1rem', fontWeight: 700, letterSpacing: '0.5px' }}>
-                WA
+        {/* Top Header - Workspace Switcher Bar */}
+        <div className="sidebar-header" style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', padding: '0.85rem 1rem', borderBottom: '1px solid var(--border-color)', background: 'var(--panel-bg)', minHeight: 'auto', height: 'auto' }}>
+          {/* Row 1: Workspace Badge & Identity */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+              <div className="avatar" style={{ background: 'linear-gradient(135deg, #00a884 0%, #128c7e 100%)', width: '36px', height: '36px', display: 'flex', justifyContent: 'center', alignItems: 'center', color: 'white', borderRadius: '8px', fontSize: '0.95rem', fontWeight: 700 }}>
+                {getAvatarChar(brainConfig?.profileName || tenantId)}
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                <span style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-main)', letterSpacing: '0.2px' }}>{brainConfig?.profileName || 'WhatsApp Agent'}</span>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-main)' }}>
+                    {brainConfig?.profileName || tenantId}
+                  </span>
+                  <span style={{ fontSize: '0.68rem', backgroundColor: 'var(--hover-chat)', color: 'var(--text-muted)', padding: '1px 5px', borderRadius: '4px' }}>
+                    {tenantId}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px' }}>
                   <div className={`status-dot ${status === 'READY' ? 'ready' : ''}`}></div>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 500, letterSpacing: '0.5px' }}>{status}</span>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{status}</span>
                 </div>
               </div>
             </div>
+
+            <button 
+              onClick={() => setShowSettings(true)}
+              title="Workspace Settings"
+              style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--hover-chat)', color: 'var(--text-main)', cursor: 'pointer', fontSize: '0.85rem' }}
+            >
+              ⚙️
+            </button>
+          </div>
+
+          {/* Row 2: Workspace Dropdown Switcher */}
+          <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.1rem' }}>
+            <select
+              value={tenantId}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === 'CREATE_NEW') {
+                  setShowNewWorkspaceModal(true);
+                } else {
+                  setTenantId(val);
+                  setActiveChat(null);
+                  setMessages([]);
+                  setCrmContext(null);
+                  setCrmType('');
+                  setChats([]);
+                  setCustomers([]);
+                }
+              }}
+              style={{
+                flex: 1,
+                padding: '0.45rem 0.65rem',
+                fontSize: '0.8rem',
+                borderRadius: '6px',
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'var(--hover-chat)',
+                color: 'var(--text-main)',
+                outline: 'none',
+                cursor: 'pointer',
+                fontWeight: 600
+              }}
+            >
+              {tenantsList.map(t => (
+                <option key={t.id} value={t.id}>
+                  🏬 {t.name} ({t.id})
+                </option>
+              ))}
+              <option value="CREATE_NEW">➕ Create New Workspace...</option>
+            </select>
+
+            {status !== 'READY' && status !== 'QR_READY' && status !== 'SYNCING' && status !== 'AUTHENTICATED' && (
+              <button 
+                onClick={initializeSession}
+                style={{ padding: '0.45rem 0.75rem', fontSize: '0.8rem', borderRadius: '6px', backgroundColor: 'var(--accent-green)', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 700 }}
+              >
+                Connect
+              </button>
+            )}
+            {(status === 'READY' || status === 'QR_READY' || status === 'SYNCING') && (
+              <button 
+                onClick={logoutSession}
+                style={{ padding: '0.45rem 0.75rem', fontSize: '0.8rem', borderRadius: '6px', backgroundColor: '#ef4444', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 700 }}
+              >
+                Logout
+              </button>
+            )}
           </div>
         </div>
 
         {/* Tab Bar Selection */}
         <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', background: 'var(--panel-bg)' }}>
-          <button 
-            onClick={() => setActiveTab('chats')} 
-            style={{ 
-              flex: 1, 
-              padding: '0.75rem', 
-              border: 'none', 
-              borderBottom: activeTab === 'chats' ? '2.5px solid var(--accent-green)' : '2.5px solid transparent', 
-              background: 'none', 
-              color: activeTab === 'chats' ? 'var(--text-main)' : 'var(--text-muted)', 
-              fontWeight: activeTab === 'chats' ? 700 : 500, 
-              fontSize: '0.85rem', 
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              outline: 'none'
-            }}
-          >
-            💬 Chats
-          </button>
-          <button 
-            onClick={() => {
-              setActiveTab('customers');
-              loadCustomers();
-            }} 
-            style={{ 
-              flex: 1, 
-              padding: '0.75rem', 
-              border: 'none', 
-              borderBottom: activeTab === 'customers' ? '2.5px solid var(--accent-green)' : '2.5px solid transparent', 
-              background: 'none', 
-              color: activeTab === 'customers' ? 'var(--text-main)' : 'var(--text-muted)', 
-              fontWeight: activeTab === 'customers' ? 700 : 500, 
-              fontSize: '0.85rem', 
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              outline: 'none'
-            }}
-          >
-            👥 Customers
-          </button>
-          <button 
-            onClick={() => {
-              setActiveTab('caterings');
-              loadCateringLeads();
-            }} 
-            style={{ 
-              flex: 1, 
-              padding: '0.75rem', 
-              border: 'none', 
-              borderBottom: activeTab === 'caterings' ? '2.5px solid var(--accent-green)' : '2.5px solid transparent', 
-              background: 'none', 
-              color: activeTab === 'caterings' ? 'var(--text-main)' : 'var(--text-muted)', 
-              fontWeight: activeTab === 'caterings' ? 700 : 500, 
-              fontSize: '0.85rem', 
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              outline: 'none'
-            }}
-          >
-            🍽️ Catering Leads
-          </button>
+          {brainConfig.enabledTabs?.chats !== false && (
+            <button 
+              onClick={() => setActiveTab('chats')} 
+              style={{ 
+                flex: 1, 
+                padding: '0.75rem', 
+                border: 'none', 
+                borderBottom: activeTab === 'chats' ? '2.5px solid var(--accent-green)' : '2.5px solid transparent', 
+                background: 'none', 
+                color: activeTab === 'chats' ? 'var(--text-main)' : 'var(--text-muted)', 
+                fontWeight: activeTab === 'chats' ? 700 : 500, 
+                fontSize: '0.85rem', 
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                outline: 'none'
+              }}
+            >
+              💬 Chats
+            </button>
+          )}
+          {brainConfig.enabledTabs?.customers !== false && (
+            <button 
+              onClick={() => {
+                setActiveTab('customers');
+                loadCustomers();
+              }} 
+              style={{ 
+                flex: 1, 
+                padding: '0.75rem', 
+                border: 'none', 
+                borderBottom: activeTab === 'customers' ? '2.5px solid var(--accent-green)' : '2.5px solid transparent', 
+                background: 'none', 
+                color: activeTab === 'customers' ? 'var(--text-main)' : 'var(--text-muted)', 
+                fontWeight: activeTab === 'customers' ? 700 : 500, 
+                fontSize: '0.85rem', 
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                outline: 'none'
+              }}
+            >
+              👥 Customers
+            </button>
+          )}
+          {brainConfig.enabledTabs?.caterings !== false && (
+            <button 
+              onClick={() => {
+                setActiveTab('caterings');
+                loadCateringLeads();
+              }} 
+              style={{ 
+                flex: 1, 
+                padding: '0.75rem', 
+                border: 'none', 
+                borderBottom: activeTab === 'caterings' ? '2.5px solid var(--accent-green)' : '2.5px solid transparent', 
+                background: 'none', 
+                color: activeTab === 'caterings' ? 'var(--text-main)' : 'var(--text-muted)', 
+                fontWeight: activeTab === 'caterings' ? 700 : 500, 
+                fontSize: '0.85rem', 
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                outline: 'none'
+              }}
+            >
+              🍽️ Catering Leads
+            </button>
+          )}
         </div>
 
         {activeTab === 'chats' ? (
@@ -1279,155 +1413,15 @@ export default function App() {
           </>
         )}
 
-        {/* Bottom Menu / Footer - Emulating Mobile Tab Bar */}
-        <div className="sidebar-footer" style={{ borderTop: '1px solid var(--border-color)', background: 'var(--panel-bg)', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', width: '100%' }}>
-            {!isCreatingNewTenant ? (
-              <div style={{ display: 'flex', gap: '0.4rem', width: '100%' }}>
-                <select
-                  value={tenantId}
-                  onChange={(e) => {
-                    if (e.target.value === 'CREATE_NEW') {
-                      setIsCreatingNewTenant(true);
-                      setNewTenantName('');
-                    } else {
-                      setTenantId(e.target.value);
-                      setActiveChat(null);
-                      setMessages([]);
-                      setCrmContext(null);
-                      setCrmType('');
-                      setChats([]);
-                    }
-                  }}
-                  style={{
-                    flex: 1,
-                    padding: '0.6rem 0.75rem',
-                    fontSize: '0.85rem',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'var(--bg-chat)',
-                    color: 'var(--text-main)',
-                    outline: 'none',
-                    cursor: 'pointer'
-                  }}
-                >
-                  {tenantsList.map(t => (
-                    <option key={t.id} value={t.id}>{t.name} ({t.id})</option>
-                  ))}
-                  <option value="CREATE_NEW">➕ Create New Tenant...</option>
-                </select>
-                
-                {status !== 'READY' && status !== 'QR_READY' && status !== 'SYNCING' && status !== 'AUTHENTICATED' && (
-                  <button 
-                    onClick={initializeSession}
-                    style={{
-                      padding: '0.6rem 1rem',
-                      fontSize: '0.85rem',
-                      borderRadius: '8px',
-                      backgroundColor: 'var(--accent-green)',
-                      color: 'white',
-                      border: 'none',
-                      cursor: 'pointer',
-                      fontWeight: 700
-                    }}
-                  >
-                    Connect
-                  </button>
-                )}
-                {(status === 'READY' || status === 'QR_READY' || status === 'SYNCING') && (
-                  <button 
-                    onClick={logoutSession}
-                    style={{
-                      padding: '0.6rem 1rem',
-                      fontSize: '0.85rem',
-                      borderRadius: '8px',
-                      backgroundColor: '#ef4444',
-                      color: 'white',
-                      border: 'none',
-                      cursor: 'pointer',
-                      fontWeight: 700
-                    }}
-                  >
-                    Logout
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div style={{ display: 'flex', gap: '0.4rem', width: '100%' }}>
-                <input 
-                  type="text" 
-                  value={newTenantName}
-                  onChange={(e) => setNewTenantName(e.target.value)}
-                  placeholder="New Account Name..." 
-                  style={{
-                    flex: 1,
-                    padding: '0.6rem 0.75rem',
-                    fontSize: '0.85rem',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'var(--bg-chat)',
-                    color: 'var(--text-main)'
-                  }}
-                />
-                <button
-                  onClick={() => {
-                    if (newTenantName.trim()) {
-                      const rawName = newTenantName.trim();
-                      const name = rawName.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-');
-                      if (!tenantsList.some(t => t.id === name)) {
-                        setTenantsList(prev => [...prev, { id: name, name: rawName }]);
-                      }
-                      setTenantId(name);
-                      setActiveChat(null);
-                      setMessages([]);
-                      setCrmContext(null);
-                      setCrmType('');
-                      setChats([]);
-                      setIsCreatingNewTenant(false);
-                      setStatus('INITIALIZING');
-                      apiFetch(`/api/${name}/initialize`, { method: 'POST' }).catch(console.error);
-                    }
-                  }}
-                  style={{
-                    padding: '0.6rem 1rem',
-                    fontSize: '0.85rem',
-                    borderRadius: '8px',
-                    backgroundColor: 'var(--accent-green)',
-                    color: 'white',
-                    border: 'none',
-                    cursor: 'pointer',
-                    fontWeight: 700
-                  }}
-                >
-                  Add
-                </button>
-                <button
-                  onClick={() => setIsCreatingNewTenant(false)}
-                  style={{
-                    padding: '0.6rem 1rem',
-                    fontSize: '0.85rem',
-                    borderRadius: '8px',
-                    backgroundColor: 'rgba(255,255,255,0.1)',
-                    color: 'var(--text-main)',
-                    border: '1px solid var(--border-color)',
-                    cursor: 'pointer',
-                    fontWeight: 500
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
-          </div>
-          
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', width: '100%', marginBottom: '0.5rem' }}>
-            <button onClick={loadChats} style={{ background: 'var(--active-chat)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', padding: '10px 0', color: 'var(--text-main)', fontWeight: 600, textAlign: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.2)' }} title="Force Refresh Chats">Refresh Chats</button>
-            <button onClick={() => setShowNewChat(true)} style={{ background: 'var(--active-chat)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', padding: '10px 0', color: 'var(--text-main)', fontWeight: 600, textAlign: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.2)' }} title="Start New Chat">New Chat</button>
+        {/* Bottom Menu / Footer */}
+        <div className="sidebar-footer" style={{ borderTop: '1px solid var(--border-color)', background: 'var(--panel-bg)', padding: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', width: '100%' }}>
+            <button onClick={loadChats} style={{ background: 'var(--hover-chat)', border: '1px solid var(--border-color)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem', padding: '8px 0', color: 'var(--text-main)', fontWeight: 600, textAlign: 'center' }}>🔄 Refresh</button>
+            <button onClick={() => setShowNewChat(true)} style={{ background: 'var(--hover-chat)', border: '1px solid var(--border-color)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem', padding: '8px 0', color: 'var(--text-main)', fontWeight: 600, textAlign: 'center' }}>💬 New Chat</button>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', width: '100%' }}>
-            <button onClick={() => { setShowCampaigns(true); loadCampaignProfiles(); }} style={{ background: 'var(--active-chat)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', padding: '10px 0', color: 'var(--text-main)', fontWeight: 600, textAlign: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.2)' }} title="Batch Campaign Manager">Campaigns</button>
-            <button onClick={() => setShowSettings(true)} style={{ background: 'var(--active-chat)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem', padding: '10px 0', color: 'var(--text-main)', fontWeight: 600, textAlign: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.2)' }} title="Agent Brain Settings">Settings</button>
+            <button onClick={() => { setShowCampaigns(true); loadCampaignProfiles(); }} style={{ background: 'var(--hover-chat)', border: '1px solid var(--border-color)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem', padding: '8px 0', color: 'var(--text-main)', fontWeight: 600, textAlign: 'center' }}>📣 Campaigns</button>
+            <button onClick={() => setShowSettings(true)} style={{ background: 'var(--hover-chat)', border: '1px solid var(--border-color)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem', padding: '8px 0', color: 'var(--text-main)', fontWeight: 600, textAlign: 'center' }}>⚙️ Settings</button>
           </div>
         </div>
 
@@ -1950,6 +1944,49 @@ export default function App() {
                     profileName: e.target.value
                   })}
                 />
+              </div>
+
+              {/* Workspace Navigation Tabs Feature Isolation */}
+              <div style={{ marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1.2rem' }}>
+                <h3 style={{ fontSize: '1rem', color: '#3b82f6', marginBottom: '0.4rem' }}>🗂️ Workspace Navigation Tabs</h3>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.6rem' }}>
+                  Enable or disable feature tabs for this specific workspace. Unchecked tabs will be hidden from the navigation bar.
+                </span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginLeft: '0.5rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.85rem' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={brainConfig.enabledTabs?.chats !== false}
+                      onChange={(e) => setBrainConfig({
+                        ...brainConfig,
+                        enabledTabs: { ...brainConfig.enabledTabs, chats: e.target.checked }
+                      })}
+                    />
+                    <span>💬 WhatsApp Chats Tab</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.85rem' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={brainConfig.enabledTabs?.customers !== false}
+                      onChange={(e) => setBrainConfig({
+                        ...brainConfig,
+                        enabledTabs: { ...brainConfig.enabledTabs, customers: e.target.checked }
+                      })}
+                    />
+                    <span>👥 Customers & Hyperzod Sync Tab</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.85rem' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={brainConfig.enabledTabs?.caterings !== false}
+                      onChange={(e) => setBrainConfig({
+                        ...brainConfig,
+                        enabledTabs: { ...brainConfig.enabledTabs, caterings: e.target.checked }
+                      })}
+                    />
+                    <span>🍽️ Catering Leads & Chef Onboarding Tab</span>
+                  </label>
+                </div>
               </div>
 
               {/* Custom CRM Database Connection */}
@@ -2658,6 +2695,93 @@ export default function App() {
                 style={{ backgroundColor: 'var(--accent-green)', border: 'none', color: '#ffffff', borderRadius: '6px', padding: '0.5rem 1.5rem', fontSize: '0.9rem', cursor: 'pointer', fontWeight: 600, opacity: isSendingSegmentBroadcast ? 0.6 : 1 }}
               >
                 {isSendingSegmentBroadcast ? 'Queueing Broadcast...' : 'Dispatch Broadcast'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* New Workspace Wizard Modal */}
+      {showNewWorkspaceModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, backdropFilter: 'blur(3px)' }}>
+          <div style={{ backgroundColor: 'var(--bg-chat)', border: '1px solid var(--border-color)', borderRadius: '12px', width: '90%', maxWidth: '480px', padding: '2rem', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem' }}>
+              <h2 style={{ margin: 0, color: 'var(--text-main)', fontSize: '1.25rem' }}>🏬 Create New Workspace</h2>
+              <button onClick={() => setShowNewWorkspaceModal(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '1.5rem', cursor: 'pointer' }}>×</button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.4rem', fontWeight: 600 }}>Workspace / Business Name</label>
+                <input 
+                  type="text" 
+                  placeholder="e.g. Client B Storefront, Main Sales Line"
+                  value={newWorkspaceName}
+                  onChange={(e) => setNewWorkspaceName(e.target.value)}
+                  style={{ width: '100%', padding: '0.75rem', backgroundColor: 'var(--hover-chat)', border: '1px solid var(--border-color)', color: 'var(--text-main)', borderRadius: '8px', fontSize: '0.9rem', outline: 'none' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.4rem', fontWeight: 600 }}>Workspace Preset Template</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', padding: '0.6rem', borderRadius: '6px', border: newWorkspacePreset === 'hyperzod' ? '1px solid var(--accent-green)' : '1px solid var(--border-color)', backgroundColor: 'var(--hover-chat)', cursor: 'pointer' }}>
+                    <input 
+                      type="radio" 
+                      name="preset" 
+                      checked={newWorkspacePreset === 'hyperzod'} 
+                      onChange={() => setNewWorkspacePreset('hyperzod')}
+                      style={{ marginTop: '2px' }}
+                    />
+                    <div>
+                      <strong style={{ fontSize: '0.85rem', color: 'var(--text-main)', display: 'block' }}>⚡ Hyperzod E-Commerce Storefront</strong>
+                      <span style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>Includes Chats, Customer Sync & Broadcasts. Hides Catering/Chef tabs.</span>
+                    </div>
+                  </label>
+
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', padding: '0.6rem', borderRadius: '6px', border: newWorkspacePreset === 'crm' ? '1px solid var(--accent-green)' : '1px solid var(--border-color)', backgroundColor: 'var(--hover-chat)', cursor: 'pointer' }}>
+                    <input 
+                      type="radio" 
+                      name="preset" 
+                      checked={newWorkspacePreset === 'crm'} 
+                      onChange={() => setNewWorkspacePreset('crm')}
+                      style={{ marginTop: '2px' }}
+                    />
+                    <div>
+                      <strong style={{ fontSize: '0.85rem', color: 'var(--text-main)', display: 'block' }}>💬 General WhatsApp CRM</strong>
+                      <span style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>Includes Chats & Customer database. Hides Catering.</span>
+                    </div>
+                  </label>
+
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', padding: '0.6rem', borderRadius: '6px', border: newWorkspacePreset === 'catering' ? '1px solid var(--accent-green)' : '1px solid var(--border-color)', backgroundColor: 'var(--hover-chat)', cursor: 'pointer' }}>
+                    <input 
+                      type="radio" 
+                      name="preset" 
+                      checked={newWorkspacePreset === 'catering'} 
+                      onChange={() => setNewWorkspacePreset('catering')}
+                      style={{ marginTop: '2px' }}
+                    />
+                    <div>
+                      <strong style={{ fontSize: '0.85rem', color: 'var(--text-main)', display: 'block' }}>🍽️ Homemade Catering & Chef Onboarding</strong>
+                      <span style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>Full legacy suite including Catering Leads and Chef welcome daemons.</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem', marginTop: '1.5rem' }}>
+              <button 
+                type="button" 
+                onClick={() => setShowNewWorkspaceModal(false)} 
+                style={{ backgroundColor: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-main)', borderRadius: '6px', padding: '0.5rem 1.25rem', fontSize: '0.9rem', cursor: 'pointer', fontWeight: 600 }}
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleCreateWorkspace}
+                style={{ backgroundColor: 'var(--accent-green)', border: 'none', color: '#ffffff', borderRadius: '6px', padding: '0.5rem 1.5rem', fontSize: '0.9rem', cursor: 'pointer', fontWeight: 600 }}
+              >
+                Create Workspace
               </button>
             </div>
           </div>

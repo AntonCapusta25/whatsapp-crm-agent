@@ -286,6 +286,11 @@ async function restoreSessionFromSupabase(tenantId) {
 // Default Configuration Template
 const DEFAULT_CONFIG = {
     profileName: "",
+    enabledTabs: {
+        chats: true,
+        customers: true,
+        caterings: true
+    },
     crmSettings: {
         enabled: false,
         url: "",
@@ -371,6 +376,7 @@ async function getBrainConfig(tenantId) {
                 const loaded = data.settings;
                 return {
                     profileName: loaded.profileName || "",
+                    enabledTabs: { ...DEFAULT_CONFIG.enabledTabs, ...loaded.enabledTabs },
                     crmSettings: { ...DEFAULT_CONFIG.crmSettings, ...loaded.crmSettings },
                     hyperzodSettings: { ...DEFAULT_CONFIG.hyperzodSettings, ...loaded.hyperzodSettings },
                     cateringWelcomeEnabled: loaded.cateringWelcomeEnabled || false,
@@ -408,6 +414,7 @@ async function getBrainConfig(tenantId) {
             const loaded = JSON.parse(fs.readFileSync(tenantFile, 'utf8'));
             return {
                 profileName: loaded.profileName || "",
+                enabledTabs: { ...DEFAULT_CONFIG.enabledTabs, ...loaded.enabledTabs },
                 crmSettings: { ...DEFAULT_CONFIG.crmSettings, ...loaded.crmSettings },
                 hyperzodSettings: { ...DEFAULT_CONFIG.hyperzodSettings, ...loaded.hyperzodSettings },
                 cateringWelcomeEnabled: loaded.cateringWelcomeEnabled || false,
@@ -2482,17 +2489,20 @@ app.get('/api/tenants', async (req, res) => {
     // Always guarantee 'default' is present
     tenants.add('default');
 
-    // Resolve profileName for each tenant
+    // Resolve profileName, status, and enabledTabs for each tenant
     const tenantsData = [];
     for (const t of tenants) {
         try {
             const config = await getBrainConfig(t);
+            const status = sessionManager.getStatus(t);
             tenantsData.push({
                 id: t,
-                name: config.profileName || t
+                name: config.profileName || t,
+                status: status,
+                enabledTabs: config.enabledTabs || { chats: true, customers: true, caterings: true }
             });
         } catch (e) {
-            tenantsData.push({ id: t, name: t });
+            tenantsData.push({ id: t, name: t, status: 'DISCONNECTED', enabledTabs: { chats: true, customers: true, caterings: true } });
         }
     }
 
