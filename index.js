@@ -2415,12 +2415,32 @@ app.get('/api/:tenantId/chats', async (req, res) => {
         const fetchPromise = (async () => {
             console.log(`[API] Calling client.getChats() for tenant ${tenantId}...`);
             try {
-                const getChatsPromise = client.getChats();
-                const timeoutPromise = new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('client.getChats() timeout (10s)')), 10000)
-                );
-                const chats = await Promise.race([getChatsPromise, timeoutPromise]);
-                console.log(`[API] client.getChats() returned ${chats ? chats.length : 0} chats for tenant ${tenantId}`);
+                let chats = null;
+                if (client.pupPage && !client.pupPage.isClosed()) {
+                    try {
+                        chats = await client.pupPage.evaluate(() => {
+                            if (window.WWebJS && typeof window.WWebJS.getChats === 'function') {
+                                return window.WWebJS.getChats();
+                            }
+                            return null;
+                        });
+                        if (chats) {
+                            console.log(`[API] Direct pupPage evaluate returned ${chats.length} raw chats for tenant ${tenantId}`);
+                        }
+                    } catch (evalErr) {
+                        console.warn(`[API] Direct evaluate warning for ${tenantId}:`, evalErr.message);
+                    }
+                }
+
+                if (!chats || chats.length === 0) {
+                    const getChatsPromise = client.getChats();
+                    const timeoutPromise = new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error('client.getChats() timeout (10s)')), 10000)
+                    );
+                    chats = await Promise.race([getChatsPromise, timeoutPromise]);
+                    console.log(`[API] client.getChats() returned ${chats ? chats.length : 0} chats for tenant ${tenantId}`);
+                }
+
                 if (chats && chats.length > 0) {
                     chats.slice(0, 100).forEach((chat) => {
                         let lastMsgText = '';
@@ -2431,10 +2451,12 @@ app.get('/api/:tenantId/chats', async (req, res) => {
                             lastMsgTime = chat.lastMessage.timestamp || chat.timestamp || 0;
                             lastMsgFromMe = chat.lastMessage.fromMe ?? true;
                         }
+                        const chatIdStr = typeof chat.id === 'object' ? chat.id._serialized : String(chat.id);
+                        const chatNameStr = chat.name || (chat.id && chat.id.user) || chatIdStr;
                         sessionManager.updateKnownChat(
                             tenantId,
-                            chat.id._serialized,
-                            chat.name || chat.id.user,
+                            chatIdStr,
+                            chatNameStr,
                             lastMsgText,
                             lastMsgTime,
                             lastMsgFromMe,
