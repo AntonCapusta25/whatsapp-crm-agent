@@ -2425,10 +2425,13 @@ app.get('/api/:tenantId/chats', async (req, res) => {
                 let chats = null;
                 if (client.pupPage && !client.pupPage.isClosed()) {
                     try {
-                        const hasStore = await client.pupPage.evaluate(() => typeof window.Store !== 'undefined' && typeof window.Store.Chat !== 'undefined');
+                        let hasStore = await client.pupPage.evaluate(() => typeof window.Store !== 'undefined' && typeof window.Store.Chat !== 'undefined');
                         if (!hasStore && typeof client.inject === 'function') {
-                            console.log(`[API] 🔄 window.Store.Chat missing on page for ${tenantId}. Injecting WWebJS...`);
-                            await client.inject();
+                            console.log(`[API] 🔄 window.Store.Chat missing on page for ${tenantId}. Forcing client.inject()...`);
+                            try {
+                                await client.inject();
+                                await new Promise(r => setTimeout(r, 1000));
+                            } catch (e) {}
                         }
                         const evalResult = await client.pupPage.evaluate(() => {
                             try {
@@ -2442,7 +2445,12 @@ app.get('/api/:tenantId/chats', async (req, res) => {
                                     }
                                 }
                                 if (!window.Store || !window.Store.Chat) {
-                                    return { error: 'Store or Store.Chat not available', storePresent: !!window.Store };
+                                    return { 
+                                        error: 'Store or Store.Chat not available', 
+                                        storePresent: !!window.Store,
+                                        hasWWebJS: typeof window.WWebJS !== 'undefined',
+                                        hasRequire: typeof window.require === 'function'
+                                    };
                                 }
                                 const chatStore = window.Store.Chat;
                                 let list = null;
