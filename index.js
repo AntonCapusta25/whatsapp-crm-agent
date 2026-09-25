@@ -171,6 +171,10 @@ async function saveSessionToSupabase(tenantId) {
                     entry.name === 'RunningChromeVersion' ||
                     entry.name === 'Cache' ||
                     entry.name === 'Code Cache' ||
+                    entry.name === 'GPUCache' ||
+                    entry.name === 'DawnCache' ||
+                    entry.name === 'blob_storage' ||
+                    entry.name === 'Crashpad' ||
                     entry.name === 'Service Worker' ||
                     entry.name.startsWith('.org.chromium') ||
                     entry.isSymbolicLink()
