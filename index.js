@@ -1026,6 +1026,34 @@ class SessionManager {
         this.syncMsgs = new Map();         // tenantId -> string
         this.queues = new Map();           // tenantId -> Array
         this.isProcessingQueue = new Map(); // tenantId -> boolean
+        this.knownChats = new Map();       // tenantId -> Map(jid -> chatObj)
+    }
+
+    updateKnownChat(tenantId, jid, name, lastMessage, timestamp, fromMe, unreadCount = 0) {
+        if (!jid) return;
+        let tenantMap = this.knownChats.get(tenantId);
+        if (!tenantMap) {
+            tenantMap = new Map();
+            this.knownChats.set(tenantId, tenantMap);
+        }
+        const sanitizedJid = jid.includes('@') ? jid : `${sanitizePhone(jid)}@c.us`;
+        const existing = tenantMap.get(sanitizedJid) || {};
+        const updatedName = name || existing.name || sanitizedJid.split('@')[0];
+        tenantMap.set(sanitizedJid, {
+            id: sanitizedJid,
+            name: updatedName,
+            unreadCount: unreadCount !== undefined ? unreadCount : (existing.unreadCount || 0),
+            timestamp: timestamp || Math.floor(Date.now() / 1000),
+            isGroup: sanitizedJid.includes('@g.us'),
+            lastMessage: lastMessage !== undefined ? lastMessage : (existing.lastMessage || ''),
+            unanswered: lastMessage ? !fromMe : (existing.unanswered || false)
+        });
+    }
+
+    getKnownChats(tenantId) {
+        const tenantMap = this.knownChats.get(tenantId);
+        if (!tenantMap) return [];
+        return Array.from(tenantMap.values()).sort((a, b) => b.timestamp - a.timestamp);
     }
 
     async getClient(tenantId) {
@@ -1171,6 +1199,8 @@ class SessionManager {
             const phone = msg.from.split('@')[0];
             const jid = msg.from;
 
+            this.updateKnownChat(tenantId, jid, phone, msg.body, msg.timestamp, false, 1);
+
             broadcastSSE({
                 type: 'log',
                 tenantId: tenantId,
@@ -1307,7 +1337,10 @@ class SessionManager {
         // Event: Message create (captures outgoing messages)
         client.on('message_create', (msg) => {
             if (msg.fromMe) {
-                const phone = msg.to.split('@')[0];
+                const targetJid = msg.to || msg.from;
+                const phone = targetJid ? targetJid.split('@')[0] : '';
+                this.updateKnownChat(tenantId, targetJid, phone, msg.body, msg.timestamp || Math.floor(Date.now() / 1000), true, 0);
+
                 broadcastSSE({
                     type: 'log',
                     tenantId: tenantId,
@@ -1375,6 +1408,8 @@ class SessionManager {
     }
 
     queueMessage(tenantId, jid, text, isImmediate = false) {
+        this.updateKnownChat(tenantId, jid, jid.split('@')[0], text, Math.floor(Date.now() / 1000), true, 0);
+
         const q = this.queues.get(tenantId) || [];
         q.push({
             jid: jid,
@@ -2206,32 +2241,41 @@ app.get('/api/:tenantId/chats', async (req, res) => {
 
     const fetchAndMapChats = async () => {
         console.log(`[API] Calling client.getChats() for tenant ${tenantId}...`);
-        const chats = await client.getChats();
-        console.log(`[API] client.getChats() returned ${chats ? chats.length : 0} chats for tenant ${tenantId}`);
-        if (!chats || chats.length === 0) {
-            return [];
-        }
-        const chatList = chats.slice(0, 100).map((chat) => {
-            let lastMsgText = '';
-            let lastMsgTime = chat.timestamp || 0;
-            let lastMsgFromMe = true;
-            if (chat.lastMessage) {
-                lastMsgText = chat.lastMessage.body || '';
-                lastMsgTime = chat.lastMessage.timestamp || chat.timestamp || 0;
-                lastMsgFromMe = chat.lastMessage.fromMe ?? true;
+        try {
+            const chats = await client.getChats();
+            console.log(`[API] client.getChats() returned ${chats ? chats.length : 0} chats for tenant ${tenantId}`);
+            if (chats && chats.length > 0) {
+                chats.slice(0, 100).forEach((chat) => {
+                    let lastMsgText = '';
+                    let lastMsgTime = chat.timestamp || 0;
+                    let lastMsgFromMe = true;
+                    if (chat.lastMessage) {
+                        lastMsgText = chat.lastMessage.body || '';
+                        lastMsgTime = chat.lastMessage.timestamp || chat.timestamp || 0;
+                        lastMsgFromMe = chat.lastMessage.fromMe ?? true;
+                    }
+                    sessionManager.updateKnownChat(
+                        tenantId,
+                        chat.id._serialized,
+                        chat.name || chat.id.user,
+                        lastMsgText,
+                        lastMsgTime,
+                        lastMsgFromMe,
+                        chat.unreadCount || 0
+                    );
+                });
             }
-            return {
-                id: chat.id._serialized,
-                name: chat.name || chat.id.user || chat.id._serialized,
-                unreadCount: chat.unreadCount || 0,
-                timestamp: lastMsgTime,
-                isGroup: chat.isGroup || false,
-                lastMessage: lastMsgText,
-                unanswered: lastMsgText ? !lastMsgFromMe : false
-            };
-        });
-        chatList.sort((a, b) => b.timestamp - a.timestamp);
-        return chatList;
+        } catch (e) {
+            console.warn(`[API] Warning calling client.getChats() for ${tenantId}:`, e.message);
+        }
+
+        // Auto-promote status to READY once chats are fetched
+        if (sessionManager.statuses.get(tenantId) !== 'READY') {
+            sessionManager.statuses.set(tenantId, 'READY');
+            broadcastSSE({ type: 'status', tenantId, status: 'READY' });
+        }
+
+        return sessionManager.getKnownChats(tenantId);
     };
 
     try {
