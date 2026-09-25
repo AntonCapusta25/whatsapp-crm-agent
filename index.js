@@ -2386,6 +2386,9 @@ app.post('/api/:tenantId/config', async (req, res) => {
     return res.json({ success: true });
 });
 
+const activeChatFetches = new Map(); // tenantId -> Promise
+const lastChatFetchTime = new Map(); // tenantId -> timestamp
+
 app.get('/api/:tenantId/chats', async (req, res) => {
     const { tenantId } = req.params;
     const client = await sessionManager.getClient(tenantId);
@@ -2393,46 +2396,64 @@ app.get('/api/:tenantId/chats', async (req, res) => {
 
     console.log(`[Chats] tenantId=${tenantId} client=${!!client} status=${status} sessions_keys=${JSON.stringify(Array.from(sessionManager.sessions.keys()))}`);
 
-    const isClientAvailable = client && (status === 'READY' || status === 'SYNCING' || status === 'AUTHENTICATED' || !!client.info);
+    const isClientAvailable = client && (status === 'READY' || !!client.info);
     if (!isClientAvailable) {
         return res.json({ success: true, chats: sessionManager.getKnownChats(tenantId), status, message: `WhatsApp client is not ready. Status: ${status}` });
     }
 
     const fetchAndMapChats = async () => {
-        console.log(`[API] Calling client.getChats() for tenant ${tenantId}...`);
-        try {
-            const getChatsPromise = client.getChats();
-            const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('client.getChats() timeout (15s)')), 15000)
-            );
-            const chats = await Promise.race([getChatsPromise, timeoutPromise]);
-            console.log(`[API] client.getChats() returned ${chats ? chats.length : 0} chats for tenant ${tenantId}`);
-            if (chats && chats.length > 0) {
-                chats.slice(0, 100).forEach((chat) => {
-                    let lastMsgText = '';
-                    let lastMsgTime = chat.timestamp || 0;
-                    let lastMsgFromMe = true;
-                    if (chat.lastMessage) {
-                        lastMsgText = chat.lastMessage.body || '';
-                        lastMsgTime = chat.lastMessage.timestamp || chat.timestamp || 0;
-                        lastMsgFromMe = chat.lastMessage.fromMe ?? true;
-                    }
-                    sessionManager.updateKnownChat(
-                        tenantId,
-                        chat.id._serialized,
-                        chat.name || chat.id.user,
-                        lastMsgText,
-                        lastMsgTime,
-                        lastMsgFromMe,
-                        chat.unreadCount || 0
-                    );
-                });
-            }
-        } catch (e) {
-            console.warn(`[API] Warning calling client.getChats() for ${tenantId}:`, e.message);
+        const now = Date.now();
+        const lastFetch = lastChatFetchTime.get(tenantId) || 0;
+        if (now - lastFetch < 4000) {
+            return sessionManager.getKnownChats(tenantId);
         }
 
-        return sessionManager.getKnownChats(tenantId);
+        if (activeChatFetches.has(tenantId)) {
+            return activeChatFetches.get(tenantId);
+        }
+
+        const fetchPromise = (async () => {
+            console.log(`[API] Calling client.getChats() for tenant ${tenantId}...`);
+            try {
+                const getChatsPromise = client.getChats();
+                const timeoutPromise = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('client.getChats() timeout (10s)')), 10000)
+                );
+                const chats = await Promise.race([getChatsPromise, timeoutPromise]);
+                console.log(`[API] client.getChats() returned ${chats ? chats.length : 0} chats for tenant ${tenantId}`);
+                if (chats && chats.length > 0) {
+                    chats.slice(0, 100).forEach((chat) => {
+                        let lastMsgText = '';
+                        let lastMsgTime = chat.timestamp || 0;
+                        let lastMsgFromMe = true;
+                        if (chat.lastMessage) {
+                            lastMsgText = chat.lastMessage.body || '';
+                            lastMsgTime = chat.lastMessage.timestamp || chat.timestamp || 0;
+                            lastMsgFromMe = chat.lastMessage.fromMe ?? true;
+                        }
+                        sessionManager.updateKnownChat(
+                            tenantId,
+                            chat.id._serialized,
+                            chat.name || chat.id.user,
+                            lastMsgText,
+                            lastMsgTime,
+                            lastMsgFromMe,
+                            chat.unreadCount || 0
+                        );
+                    });
+                }
+                lastChatFetchTime.set(tenantId, Date.now());
+            } catch (e) {
+                console.warn(`[API] Warning calling client.getChats() for ${tenantId}:`, e.message || e);
+            } finally {
+                activeChatFetches.delete(tenantId);
+            }
+
+            return sessionManager.getKnownChats(tenantId);
+        })();
+
+        activeChatFetches.set(tenantId, fetchPromise);
+        return fetchPromise;
     };
 
     try {
