@@ -2470,7 +2470,7 @@ app.get('/api/:tenantId/chats', async (req, res) => {
                             console.log(`[API] Direct pupPage evaluate returned ${chats.length} raw chats for tenant ${tenantId}`);
                         }
                     } catch (evalErr) {
-                        console.warn(`[API] Direct evaluate warning for ${tenantId}:`, evalErr.message);
+                        console.warn(`[API] Direct evaluate warning for ${tenantId}:`, evalErr ? (evalErr.stack || evalErr.message || evalErr) : 'unknown error');
                     }
                 }
 
