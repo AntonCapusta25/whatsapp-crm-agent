@@ -76,6 +76,49 @@ const PRESET_ANSWERS = [
   }
 ];
 
+const SOCIAL_DEAL_CONTACTS = [
+  { phone: '31651740370', name: 'Unknown' },
+  { phone: '31625557254', name: 'Debbie' },
+  { phone: '31641459908', name: 'Bjorn' },
+  { phone: '31642927378', name: 'Sisi' },
+  { phone: '31655336273', name: 'Wouter' },
+  { phone: '31622842842', name: 'Ilse' },
+  { phone: '31641643271', name: 'Noël' },
+  { phone: '31642011002', name: 'Elise' },
+  { phone: '31618655311', name: 'Elisabeth' },
+  { phone: '31639573770', name: 'David' },
+  { phone: '31628708935', name: 'Marieke' },
+  { phone: '31623106774', name: 'Wilfried' },
+  { phone: '31640505901', name: 'Fay' },
+  { phone: '31682943333', name: 'Michael' },
+  { phone: '31630672240', name: 'Rick' },
+  { phone: '31618026124', name: 'Are' },
+  { phone: '31637422055', name: 'Thorben' },
+  { phone: '31633309456', name: 'Karin' },
+  { phone: '31652353619', name: 'Trudy' },
+  { phone: '3128415311', name: 'Gina' },
+  { phone: '31612243076', name: 'Rian' },
+  { phone: '31629546295', name: 'Unknown' },
+  { phone: '31651111873', name: 'Johnny' },
+  { phone: '31645353165', name: 'Anke' },
+  { phone: '31611898480', name: 'Taylor' },
+  { phone: '31624660036', name: 'Nicole' },
+  { phone: '31641507210', name: 'Esther' },
+  { phone: '31634559619', name: 'Bijan' },
+  { phone: '31610638048', name: 'Irene' },
+  { phone: '31646535871', name: 'Jasper' },
+  { phone: '31649674071', name: 'Mark' }
+];
+
+const formatPhoneNumber = (phone) => {
+  if (!phone) return '';
+  const digits = String(phone).replace(/\D/g, '');
+  if (digits.startsWith('316') && digits.length === 11) {
+    return `+31 6 ${digits.slice(3, 5)} ${digits.slice(5, 7)} ${digits.slice(7, 9)} ${digits.slice(9)}`;
+  }
+  return `+${digits}`;
+};
+
 export default function App() {
   // ----------------------------------------------------------------
   // ALL hooks must be declared before any conditional return
@@ -101,7 +144,9 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [inputText, setInputText] = useState('');
-  const [activeTab, setActiveTab] = useState('chats');
+  const [showChatsTab, setShowChatsTab] = useState(() => localStorage.getItem('show_chats_tab') === 'true');
+  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('show_chats_tab') === 'true' ? 'chats' : 'social_deal');
+  const [socialDealSearch, setSocialDealSearch] = useState('');
   const [cateringLeads, setCateringLeads] = useState([]);
   const [loadingCaterings, setLoadingCaterings] = useState(false);
   const [cateringSearchTerm, setCateringSearchTerm] = useState('');
@@ -882,6 +927,13 @@ export default function App() {
     c.id.includes(searchTerm)
   );
 
+  const filteredSocialDeal = SOCIAL_DEAL_CONTACTS.filter(c => {
+    const q = socialDealSearch.toLowerCase().trim();
+    if (!q) return true;
+    const cleanQ = q.replace(/\D/g, '');
+    return c.name.toLowerCase().includes(q) || (cleanQ && c.phone.includes(cleanQ));
+  });
+
   const formatTime = (timestamp) => {
     if (!timestamp) return '';
     const date = new Date(timestamp * 1000);
@@ -1069,27 +1121,49 @@ export default function App() {
         </div>
 
         {/* Tab Bar Selection */}
-        <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', background: 'var(--panel-bg)' }}>
-          {brainConfig.enabledTabs?.chats !== false && (
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', background: 'var(--panel-bg)', alignItems: 'center' }}>
+          <button 
+            onClick={() => setActiveTab('social_deal')} 
+            style={{ 
+              flex: 1, 
+              padding: '0.75rem 0.4rem', 
+              border: 'none', 
+              borderBottom: activeTab === 'social_deal' ? '2.5px solid var(--accent-green)' : '2.5px solid transparent', 
+              background: 'none', 
+              color: activeTab === 'social_deal' ? 'var(--text-main)' : 'var(--text-muted)', 
+              fontWeight: activeTab === 'social_deal' ? 700 : 500, 
+              fontSize: '0.82rem', 
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              outline: 'none',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            🏷️ Social Deal
+          </button>
+
+          {showChatsTab && (
             <button 
               onClick={() => setActiveTab('chats')} 
               style={{ 
                 flex: 1, 
-                padding: '0.75rem', 
+                padding: '0.75rem 0.4rem', 
                 border: 'none', 
                 borderBottom: activeTab === 'chats' ? '2.5px solid var(--accent-green)' : '2.5px solid transparent', 
                 background: 'none', 
                 color: activeTab === 'chats' ? 'var(--text-main)' : 'var(--text-muted)', 
                 fontWeight: activeTab === 'chats' ? 700 : 500, 
-                fontSize: '0.85rem', 
+                fontSize: '0.82rem', 
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
-                outline: 'none'
+                outline: 'none',
+                whiteSpace: 'nowrap'
               }}
             >
               💬 Chats
             </button>
           )}
+
           {brainConfig.enabledTabs?.customers !== false && (
             <button 
               onClick={() => {
@@ -1098,21 +1172,23 @@ export default function App() {
               }} 
               style={{ 
                 flex: 1, 
-                padding: '0.75rem', 
+                padding: '0.75rem 0.4rem', 
                 border: 'none', 
                 borderBottom: activeTab === 'customers' ? '2.5px solid var(--accent-green)' : '2.5px solid transparent', 
                 background: 'none', 
                 color: activeTab === 'customers' ? 'var(--text-main)' : 'var(--text-muted)', 
                 fontWeight: activeTab === 'customers' ? 700 : 500, 
-                fontSize: '0.85rem', 
+                fontSize: '0.82rem', 
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
-                outline: 'none'
+                outline: 'none',
+                whiteSpace: 'nowrap'
               }}
             >
               👥 Customers
             </button>
           )}
+
           {brainConfig.enabledTabs?.caterings !== false && (
             <button 
               onClick={() => {
@@ -1121,24 +1197,161 @@ export default function App() {
               }} 
               style={{ 
                 flex: 1, 
-                padding: '0.75rem', 
+                padding: '0.75rem 0.4rem', 
                 border: 'none', 
                 borderBottom: activeTab === 'caterings' ? '2.5px solid var(--accent-green)' : '2.5px solid transparent', 
                 background: 'none', 
                 color: activeTab === 'caterings' ? 'var(--text-main)' : 'var(--text-muted)', 
                 fontWeight: activeTab === 'caterings' ? 700 : 500, 
-                fontSize: '0.85rem', 
+                fontSize: '0.82rem', 
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
-                outline: 'none'
+                outline: 'none',
+                whiteSpace: 'nowrap'
               }}
             >
-              🍽️ Catering Leads
+              🍽️ Catering
             </button>
           )}
+
+          {/* Chats Toggle Button */}
+          <button
+            onClick={() => {
+              const nextVal = !showChatsTab;
+              setShowChatsTab(nextVal);
+              localStorage.setItem('show_chats_tab', String(nextVal));
+              if (!nextVal && activeTab === 'chats') {
+                setActiveTab('social_deal');
+              } else if (nextVal) {
+                setActiveTab('chats');
+              }
+            }}
+            title={showChatsTab ? "Hide Chats tab" : "Enable Chats tab"}
+            style={{
+              padding: '0.3rem 0.5rem',
+              marginRight: '0.4rem',
+              borderRadius: '4px',
+              border: '1px solid var(--border-color)',
+              background: showChatsTab ? 'rgba(34, 197, 94, 0.15)' : 'var(--hover-chat)',
+              color: showChatsTab ? 'var(--accent-green)' : 'var(--text-muted)',
+              fontSize: '0.72rem',
+              cursor: 'pointer',
+              fontWeight: 600,
+              flexShrink: 0
+            }}
+          >
+            {showChatsTab ? '💬 ON ✕' : '+ 💬 Chats'}
+          </button>
         </div>
 
-        {activeTab === 'chats' ? (
+        {activeTab === 'social_deal' ? (
+          <>
+            {/* Search Social Deal */}
+            <div className="search-container">
+              <div className="search-box">
+                <span></span>
+                <input 
+                  type="text" 
+                  className="search-input" 
+                  placeholder="Search Social Deal (name or phone)..." 
+                  value={socialDealSearch}
+                  onChange={(e) => setSocialDealSearch(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div style={{ padding: '0.4rem 1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--panel-bg)', borderBottom: '1px solid var(--border-color)', fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+              <span>Social Deal Contacts ({filteredSocialDeal.length})</span>
+              <span style={{ fontSize: '0.7rem', color: 'var(--accent-green)', fontWeight: 600 }}>Active Campaign</span>
+            </div>
+
+            {/* Social Deal Contacts List */}
+            <div className="chat-list">
+              {filteredSocialDeal.map(contact => {
+                const jid = `${contact.phone}@c.us`;
+                const isSelected = activeChat && activeChat.id === jid;
+                const displayName = contact.name !== 'Unknown' ? contact.name : 'Unknown';
+                return (
+                  <div 
+                    key={contact.phone} 
+                    className={`chat-item ${isSelected ? 'active' : ''}`}
+                    onClick={() => setActiveChat({
+                      id: jid,
+                      name: displayName !== 'Unknown' ? displayName : formatPhoneNumber(contact.phone),
+                      lastMessage: 'Social Deal Lead',
+                      timestamp: Math.floor(Date.now() / 1000),
+                      unreadCount: 0,
+                      unanswered: false,
+                      isSocialDeal: true,
+                      socialDealDetails: contact
+                    })}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <div className="avatar" style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', color: '#fff', fontWeight: 'bold' }}>
+                      {contact.name !== 'Unknown' ? getAvatarChar(contact.name) : '🏷️'}
+                    </div>
+                    <div className="chat-item-info">
+                      <div className="chat-item-header">
+                        <span className="chat-name" style={{ fontWeight: 600, color: 'var(--text-main)' }}>
+                          {displayName}
+                        </span>
+                        <span style={{ 
+                          fontSize: '0.62rem', 
+                          fontWeight: 700, 
+                          color: '#f59e0b', 
+                          background: 'rgba(245, 158, 11, 0.12)',
+                          border: '1px solid rgba(245, 158, 11, 0.35)', 
+                          borderRadius: '4px', 
+                          padding: '1px 5px', 
+                          textTransform: 'uppercase' 
+                        }}>
+                          Social Deal
+                        </span>
+                      </div>
+                      <div className="chat-item-body">
+                        <span className="chat-last-message" style={{ color: 'var(--text-muted)', fontFamily: 'monospace', fontSize: '0.78rem' }}>
+                          {formatPhoneNumber(contact.phone)}
+                        </span>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveChat({
+                              id: jid,
+                              name: displayName !== 'Unknown' ? displayName : formatPhoneNumber(contact.phone),
+                              lastMessage: 'Social Deal Lead',
+                              timestamp: Math.floor(Date.now() / 1000),
+                              unreadCount: 0,
+                              unanswered: false,
+                              isSocialDeal: true,
+                              socialDealDetails: contact
+                            });
+                          }}
+                          style={{ 
+                            padding: '2px 8px', 
+                            borderRadius: '4px', 
+                            border: '1px solid var(--border-color)', 
+                            backgroundColor: 'var(--hover-chat)', 
+                            color: 'var(--accent-green)', 
+                            fontSize: '0.72rem', 
+                            cursor: 'pointer',
+                            fontWeight: 600
+                          }}
+                        >
+                          💬 Chat
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {filteredSocialDeal.length === 0 && (
+                <div className="placeholder-text" style={{marginTop: '2rem', textAlign: 'center', color: 'var(--text-muted)'}}>
+                  No Social Deal contacts found.
+                </div>
+              )}
+            </div>
+          </>
+        ) : activeTab === 'chats' ? (
           <>
             {/* Search */}
             <div className="search-container">
@@ -1697,7 +1910,9 @@ export default function App() {
 
       {/* Right Sidebar: CRM Context */}
       {activeChat && (() => {
-        const isCatering = activeChat?.isCateringLead || crmType === 'catering';
+        const socialDealItem = activeChat?.socialDealDetails || SOCIAL_DEAL_CONTACTS.find(c => `${c.phone}@c.us` === activeChat?.id);
+        const isSocialDeal = activeChat?.isSocialDeal || !!socialDealItem;
+        const isCatering = !isSocialDeal && (activeChat?.isCateringLead || crmType === 'catering');
         const cateringData = activeChat?.isCateringLead ? activeChat.cateringDetails : (crmType === 'catering' ? crmContext : null);
         const customerName = activeChat?.isCateringLead ? activeChat.name : (crmType === 'catering' ? crmContext?.customer_name : '');
         const displayJid = activeChat.id ? activeChat.id.split('@')[0] : '';
@@ -1714,13 +1929,62 @@ export default function App() {
             boxShadow: '-4px 0 15px rgba(0,0,0,0.2)'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.75rem', marginBottom: '0.5rem' }}>
-              <span style={{ fontSize: '1.25rem' }}>{isCatering ? '🍽️' : '📊'}</span>
+              <span style={{ fontSize: '1.25rem' }}>{isSocialDeal ? '🏷️' : isCatering ? '🍽️' : '📊'}</span>
               <h3 style={{ fontSize: '1.1rem', color: '#fff', margin: 0, fontWeight: 600, fontFamily: 'var(--font-display)' }}>
-                {isCatering ? 'Catering Lead Context' : 'Chef CRM Context'}
+                {isSocialDeal ? 'Social Deal Lead' : isCatering ? 'Catering Lead Context' : 'Chef CRM Context'}
               </h3>
             </div>
             
-            {isCatering ? (
+            {isSocialDeal ? (
+              <React.Fragment>
+                <div style={{ 
+                  background: 'rgba(245, 158, 11, 0.06)', 
+                  border: '1px solid rgba(245, 158, 11, 0.25)',
+                  padding: '1rem', 
+                  borderRadius: '12px',
+                  backdropFilter: 'blur(10px)'
+                }}>
+                  <h4 style={{ margin: '0 0 0.75rem 0', color: '#f59e0b', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <span>🏷️</span> Social Deal Prospect
+                  </h4>
+                  <div style={{ fontSize: '1.1rem', marginBottom: '0.35rem', color: '#fff', fontWeight: 600 }}>
+                    {socialDealItem?.name && socialDealItem.name !== 'Unknown' ? socialDealItem.name : 'Unknown Contact'}
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontFamily: 'monospace', marginBottom: '0.75rem' }}>
+                    {formatPhoneNumber(socialDealItem?.phone || displayJid)}
+                  </div>
+                  <div style={{ display: 'inline-block', padding: '3px 8px', borderRadius: '4px', background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.3)', color: '#fbbf24', fontSize: '0.72rem', fontWeight: 700 }}>
+                    CAMPAIGN: SOCIAL DEAL
+                  </div>
+                </div>
+
+                <div style={{ 
+                  background: 'rgba(255,255,255,0.03)', 
+                  border: '1px solid rgba(255,255,255,0.05)',
+                  padding: '1rem', 
+                  borderRadius: '12px',
+                  backdropFilter: 'blur(10px)'
+                }}>
+                  <h4 style={{ margin: '0 0 0.75rem 0', color: 'var(--accent-green)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <span>⚡</span> Quick Outreach Presets
+                  </h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    <button 
+                      onClick={() => setInputText(`Hello ${socialDealItem?.name && socialDealItem.name !== 'Unknown' ? socialDealItem.name : ''}, thank you for reaching out via Social Deal! How can we assist you today?`)}
+                      style={{ padding: '0.55rem', borderRadius: '6px', background: 'var(--hover-chat)', border: '1px solid var(--border-color)', color: 'var(--text-main)', fontSize: '0.78rem', textAlign: 'left', cursor: 'pointer' }}
+                    >
+                      💬 Welcome Greeting
+                    </button>
+                    <button 
+                      onClick={() => setInputText(`Hi! Here are the details for redeeming your Social Deal voucher. What date would you like to reserve?`)}
+                      style={{ padding: '0.55rem', borderRadius: '6px', background: 'var(--hover-chat)', border: '1px solid var(--border-color)', color: 'var(--text-main)', fontSize: '0.78rem', textAlign: 'left', cursor: 'pointer' }}
+                    >
+                      🎟️ Voucher Redemption Details
+                    </button>
+                  </div>
+                </div>
+              </React.Fragment>
+            ) : isCatering ? (
               <React.Fragment>
                 <div style={{ 
                   background: 'rgba(255,255,255,0.03)', 

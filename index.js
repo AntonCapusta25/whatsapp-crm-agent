@@ -2638,6 +2638,45 @@ app.get('/api/:tenantId/screenshot', async (req, res) => {
     }
 });
 
+// Social Deal Contacts
+const SOCIAL_DEAL_LEADS = [
+    { phone: '31651740370', name: 'Unknown' },
+    { phone: '31625557254', name: 'Debbie' },
+    { phone: '31641459908', name: 'Bjorn' },
+    { phone: '31642927378', name: 'Sisi' },
+    { phone: '31655336273', name: 'Wouter' },
+    { phone: '31622842842', name: 'Ilse' },
+    { phone: '31641643271', name: 'Noël' },
+    { phone: '31642011002', name: 'Elise' },
+    { phone: '31618655311', name: 'Elisabeth' },
+    { phone: '31639573770', name: 'David' },
+    { phone: '31628708935', name: 'Marieke' },
+    { phone: '31623106774', name: 'Wilfried' },
+    { phone: '31640505901', name: 'Fay' },
+    { phone: '31682943333', name: 'Michael' },
+    { phone: '31630672240', name: 'Rick' },
+    { phone: '31618026124', name: 'Are' },
+    { phone: '31637422055', name: 'Thorben' },
+    { phone: '31633309456', name: 'Karin' },
+    { phone: '31652353619', name: 'Trudy' },
+    { phone: '3128415311', name: 'Gina' },
+    { phone: '31612243076', name: 'Rian' },
+    { phone: '31629546295', name: 'Unknown' },
+    { phone: '31651111873', name: 'Johnny' },
+    { phone: '31645353165', name: 'Anke' },
+    { phone: '31611898480', name: 'Taylor' },
+    { phone: '31624660036', name: 'Nicole' },
+    { phone: '31641507210', name: 'Esther' },
+    { phone: '31634559619', name: 'Bijan' },
+    { phone: '31610638048', name: 'Irene' },
+    { phone: '31646535871', name: 'Jasper' },
+    { phone: '31649674071', name: 'Mark' }
+];
+
+app.get('/api/:tenantId/social-deal', (req, res) => {
+    return res.json({ success: true, contacts: SOCIAL_DEAL_LEADS });
+});
+
 // Customer Management & Segmentation Endpoints
 app.get('/api/:tenantId/customers', async (req, res) => {
     const { tenantId } = req.params;
